@@ -126,12 +126,18 @@ class ManagerBot:
                     "Список ключевых слов пуст.\n\nДобавьте: `/add_kw слово`", parse_mode="md"
                 )
                 return
-            lines = "\n".join(f"• {kw}" for kw in keywords)
+            # Разбиваем на части по 50 слов чтобы не превысить лимит Telegram
+            chunk_size = 50
+            chunks = [keywords[i:i+chunk_size] for i in range(0, len(keywords), chunk_size)]
             await event.respond(
-                f"🔑 **Ключевые слова** ({len(keywords)}):\n\n{lines}\n\n"
-                "Убрать: `/remove_kw слово`",
+                f"🔑 **Ключевые слова** — всего {len(keywords)} шт. "
+                f"({'1 часть' if len(chunks) == 1 else f'{len(chunks)} части'}):",
                 parse_mode="md",
             )
+            for i, chunk in enumerate(chunks, 1):
+                lines = "\n".join(f"• {kw}" for kw in chunk)
+                header = f"**Часть {i}/{len(chunks)}:**\n\n" if len(chunks) > 1 else ""
+                await self.bot.send_message(uid, header + lines, parse_mode="md")
 
         # ── /add_kw слово ────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/add_kw\s+([\s\S]+)", re.IGNORECASE)))
@@ -256,13 +262,17 @@ class ManagerBot:
                     parse_mode="md",
                 )
                 return
-            lines = "\n".join(f"• {kw}" for kw in keywords)
+            chunk_size = 50
+            chunks = [keywords[i:i+chunk_size] for i in range(0, len(keywords), chunk_size)]
             await event.respond(
-                f"🚫 **Слова-исключения** ({len(keywords)}):\n\n{lines}\n\n"
-                "Сообщения с этими словами **не присылаются**, даже если есть ключевые слова.\n"
-                "Убрать: `/remove_ex слово`",
+                f"🚫 **Слова-исключения** — всего {len(keywords)} шт.\n"
+                "Сообщения с этими словами не присылаются.",
                 parse_mode="md",
             )
+            for i, chunk in enumerate(chunks, 1):
+                lines = "\n".join(f"• {kw}" for kw in chunk)
+                header = f"**Часть {i}/{len(chunks)}:**\n\n" if len(chunks) > 1 else ""
+                await self.bot.send_message(uid, header + lines, parse_mode="md")
 
         @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/add_ex\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_add_ex(event):
