@@ -145,13 +145,22 @@ class ManagerBot:
         # ── /remove_kw слово ─────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_kw\s+(.+)$"))
         async def cmd_remove_kw(event):
-            keyword = event.pattern_match.group(1).strip()
-            if storage.remove_keyword(keyword):
-                await event.respond(f"✅ Слово **«{keyword}»** удалено.", parse_mode="md")
-            else:
-                await event.respond(
-                    f"❌ Слово **«{keyword}»** не найдено.", parse_mode="md"
-                )
+            raw = event.pattern_match.group(1).strip()
+            keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
+            removed, not_found = [], []
+            for kw in keywords:
+                if storage.remove_keyword(kw):
+                    removed.append(kw)
+                else:
+                    not_found.append(kw)
+            text = ""
+            if removed:
+                lines = "\n".join(f"• {kw}" for kw in removed)
+                text += f"✅ Удалено **{len(removed)}**:\n{lines}"
+            if not_found:
+                lines = "\n".join(f"• {kw}" for kw in not_found)
+                text += f"\n\n❌ Не найдено:\n{lines}"
+            await event.respond(text.strip(), parse_mode="md")
 
         # ── /pause ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/pause$"))
