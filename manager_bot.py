@@ -26,10 +26,15 @@ HELP_TEXT = """
 /add\\_kw слово — добавить ключевое слово
 /remove\\_kw слово — убрать ключевое слово
 
+**Сайты**
+/sites — список сайтов
+/add\\_site Название https://... 20 — добавить сайт (20 = минуты)
+/remove\\_site https://... — убрать сайт
+
 **Управление**
-/pause — приостановить мониторинг
-/resume — возобновить мониторинг
-/recent — последние 5 найденных заказов
+/pause — приостановить всё
+/resume — возобновить
+/recent — последние 5 находок
 
 /help — показать эту справку
 """.strip()
@@ -218,6 +223,43 @@ class ManagerBot:
                     f"{link}"
                 )
                 await self.bot.send_message(uid, text, parse_mode="md", link_preview=False)
+
+        # ── Сайты ────────────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/sites$"))
+        async def cmd_sites(event):
+            sites = storage.get_websites()
+            if not sites:
+                await event.respond(
+                    "Сайтов нет.\n\nДобавить:\n`/add_site Название https://example.com 20`\n(последнее число — интервал проверки в минутах)",
+                    parse_mode="md",
+                )
+                return
+            lines = [f"• [{s['name']}]({s['url']}) — каждые {s['interval_minutes']} мин." for s in sites]
+            await event.respond(
+                f"🌐 **Отслеживаемые сайты** ({len(sites)}):\n\n" + "\n".join(lines) +
+                "\n\nУбрать: `/remove_site https://...`",
+                parse_mode="md",
+                link_preview=False,
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add_site (.+?) (https?://\S+)(?: (\d+))?$"))
+        async def cmd_add_site(event):
+            name = event.pattern_match.group(1).strip()
+            url = event.pattern_match.group(2).strip()
+            minutes = int(event.pattern_match.group(3) or 20)
+            storage.add_website(url, name, minutes)
+            await event.respond(
+                f"✅ Сайт **{name}** добавлен.\nПроверка каждые {minutes} минут.",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_site (https?://\S+)$"))
+        async def cmd_remove_site(event):
+            url = event.pattern_match.group(1).strip()
+            if storage.remove_website(url):
+                await event.respond("✅ Сайт удалён.")
+            else:
+                await event.respond("❌ Сайт не найден.")
 
         # ── /getid ───────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/getid$"))

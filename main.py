@@ -13,6 +13,7 @@ from telethon import TelegramClient
 import storage
 from monitor import Monitor
 from manager_bot import ManagerBot
+from web_monitor import WebMonitor
 
 # ─── Папки создаём до всего остального ──────────────────────────────────────
 Path("data").mkdir(exist_ok=True)
@@ -78,11 +79,22 @@ async def main():
 
     tg = cfg["telegram"]
 
+    # Прокси (нужен если VPS в России)
+    proxy = None
+    if tg.get("proxy"):
+        p = tg["proxy"]
+        import socks
+        proxy = (socks.SOCKS5, p["host"], p["port"])
+        if p.get("username"):
+            proxy = (socks.SOCKS5, p["host"], p["port"], True, p["username"], p["password"])
+        logger.info(f"Прокси: {p['host']}:{p['port']}")
+
     # Клиент вашего аккаунта — слушает каналы
     user_client = TelegramClient(
         "sessions/user",
         tg["api_id"],
         tg["api_hash"],
+        proxy=proxy,
     )
 
     # Клиент бота — отправляет уведомления и принимает команды
@@ -90,6 +102,7 @@ async def main():
         "sessions/bot",
         tg["api_id"],
         tg["api_hash"],
+        proxy=proxy,
     )
 
     logger.info("Подключение к Telegram…")
@@ -104,6 +117,7 @@ async def main():
     # Создаём и настраиваем компоненты
     monitor = Monitor(cfg, user_client, bot_client)
     manager = ManagerBot(cfg, bot_client, monitor)
+    web_monitor = WebMonitor(cfg, bot_client, lambda: monitor.paused)
 
     monitor.setup()
     manager.setup()
@@ -123,6 +137,7 @@ async def main():
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected(),
+        web_monitor.run(),
     )
 
 

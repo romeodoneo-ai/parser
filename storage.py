@@ -43,6 +43,21 @@ def init_db():
                 added_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS websites (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                url              TEXT UNIQUE NOT NULL,
+                name             TEXT NOT NULL,
+                interval_minutes INTEGER DEFAULT 20,
+                active           INTEGER DEFAULT 1,
+                added_at         TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS web_hashes (
+                url          TEXT PRIMARY KEY,
+                content_hash TEXT NOT NULL,
+                checked_at   TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS matches (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel          TEXT NOT NULL,
@@ -138,6 +153,42 @@ def remove_keyword(keyword: str) -> bool:
         cursor = conn.execute("UPDATE keywords SET active=0 WHERE keyword=?", (keyword,))
         return cursor.rowcount > 0
 
+
+# ─────────────── Сайты ───────────────
+
+def get_websites():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT url, name, interval_minutes FROM websites WHERE active=1").fetchall()
+        return [dict(r) for r in rows]
+
+def add_website(url: str, name: str, interval_minutes: int = 20):
+    url = url.strip()
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO websites (url, name, interval_minutes, added_at) VALUES (?, ?, ?, ?)",
+                (url, name, interval_minutes, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            conn.execute("UPDATE websites SET active=1 WHERE url=?", (url,))
+
+def remove_website(url: str) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute("UPDATE websites SET active=0 WHERE url=?", (url.strip(),))
+        return cursor.rowcount > 0
+
+def get_web_hash(url: str):
+    with get_conn() as conn:
+        row = conn.execute("SELECT content_hash FROM web_hashes WHERE url=?", (url,)).fetchone()
+        return row["content_hash"] if row else None
+
+def set_web_hash(url: str, content_hash: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO web_hashes (url, content_hash, checked_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(url) DO UPDATE SET content_hash=excluded.content_hash, checked_at=excluded.checked_at",
+            (url, content_hash, datetime.now().isoformat()),
+        )
 
 # ─────────────── Статистика ───────────────
 
