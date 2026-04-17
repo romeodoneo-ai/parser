@@ -87,7 +87,7 @@ def save_match(channel: str, message_id: int, preview: str, keywords: list):
 
 # ─────────────── Каналы ───────────────
 
-def get_channels() -> list[str]:
+def get_channels():
     with get_conn() as conn:
         rows = conn.execute("SELECT channel FROM channels WHERE active=1").fetchall()
         return [r["channel"] for r in rows]
@@ -114,7 +114,7 @@ def remove_channel(channel: str) -> bool:
 
 # ─────────────── Ключевые слова ───────────────
 
-def get_keywords() -> list[str]:
+def get_keywords():
     with get_conn() as conn:
         rows = conn.execute("SELECT keyword FROM keywords WHERE active=1").fetchall()
         return [r["keyword"] for r in rows]
@@ -157,7 +157,7 @@ def get_stats() -> dict:
         }
 
 
-def get_matches_since(hours: float) -> list[dict]:
+def get_matches_since(hours: float):
     from datetime import timedelta
     since = (datetime.now() - timedelta(hours=hours)).isoformat()
     with get_conn() as conn:
@@ -169,7 +169,7 @@ def get_matches_since(hours: float) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def get_recent_matches(limit: int = 5) -> list[dict]:
+def get_recent_matches(limit: int = 5):
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT channel, preview, matched_keywords, matched_at "

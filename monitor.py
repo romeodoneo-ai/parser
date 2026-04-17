@@ -87,7 +87,7 @@ class Monitor:
         except Exception as e:
             logger.error(f"Ошибка при обработке сообщения: {e}", exc_info=True)
 
-    def _is_monitored(self, username: str | None, chat_id: str) -> bool:
+    def _is_monitored(self, username, chat_id: str) -> bool:
         """Проверяет, есть ли канал в списке отслеживаемых."""
         monitored = storage.get_channels()
         for ch in monitored:

@@ -8,8 +8,8 @@ from datetime import datetime
 def format_notification(
     channel_display: str,
     text: str,
-    matched_keywords: list[str],
-    message_link: str | None = None,
+    matched_keywords,
+    message_link=None,
 ) -> str:
     """Собирает красивую карточку для уведомления."""
 

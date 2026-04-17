@@ -7,7 +7,7 @@ import storage
 MIN_MESSAGE_LENGTH = 20  # Короче — игнорируем (скорее всего не заказ)
 
 
-def find_keywords(text: str) -> list[str]:
+def find_keywords(text: str):
     """Возвращает список найденных ключевых слов в тексте."""
     if not text:
         return []
@@ -18,7 +18,7 @@ def find_keywords(text: str) -> list[str]:
     return [kw for kw in keywords if kw.lower() in text_lower]
 
 
-def is_match(text: str) -> tuple[bool, list[str]]:
+def is_match(text: str):
     """
     Проверяет, является ли сообщение потенциальным заказом.
     Возвращает (подходит: bool, найденные_слова: list).
