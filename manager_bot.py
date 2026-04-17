@@ -158,6 +158,67 @@ class ManagerBot:
                 self.monitor.paused = False
                 await event.respond("▶️ Мониторинг **возобновлён**.", parse_mode="md")
 
+        # ── /report ──────────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/report$"))
+        async def cmd_report_help(event):
+            await event.respond(
+                "📋 **Отчёт за период**\n\n"
+                "Укажите период:\n"
+                "`/report 1h` — последний час\n"
+                "`/report 6h` — последние 6 часов\n"
+                "`/report 12h` — последние 12 часов\n"
+                "`/report 24h` — последние сутки\n"
+                "`/report 3d` — последние 3 дня\n"
+                "`/report 7d` — последняя неделя",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/report (\d+)(h|d)$"))
+        async def cmd_report(event):
+            amount = int(event.pattern_match.group(1))
+            unit = event.pattern_match.group(2)
+            hours = amount if unit == "h" else amount * 24
+
+            matches = storage.get_matches_since(hours)
+
+            period_label = f"{amount} {'час' if unit == 'h' else 'дн'}{'а' if amount in (2,3,4) else 'ей' if amount > 4 else ''}"
+            if unit == "h" and amount == 1:
+                period_label = "час"
+
+            if not matches:
+                await event.respond(f"За последние {period_label} ничего не найдено.")
+                return
+
+            # Отправляем по одному сообщению на каждую находку (чтобы не превысить лимит)
+            await event.respond(
+                f"📋 **Отчёт за последние {period_label}** — найдено {len(matches)} заявок:",
+                parse_mode="md",
+            )
+
+            for i, m in enumerate(matches, 1):
+                dt = m["matched_at"][:16].replace("T", " ")
+                preview = m["preview"][:400] + "…" if len(m["preview"]) > 400 else m["preview"]
+                msg_id = m.get("message_id")
+
+                # Пробуем собрать ссылку
+                channel = m["channel"]
+                link = ""
+                if channel.startswith("-100"):
+                    numeric_id = channel.replace("-100", "")
+                    if msg_id:
+                        link = f"\n[🔗 Открыть](https://t.me/c/{numeric_id}/{msg_id})"
+                elif channel.startswith("@"):
+                    if msg_id:
+                        link = f"\n[🔗 Открыть](https://t.me/{channel.lstrip('@')}/{msg_id})"
+
+                text = (
+                    f"**{i}.** {channel} · {dt}\n"
+                    f"🏷 {m['matched_keywords']}\n\n"
+                    f"{preview}"
+                    f"{link}"
+                )
+                await self.bot.send_message(uid, text, parse_mode="md", link_preview=False)
+
         # ── /getid ───────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/getid$"))
         async def cmd_getid(event):

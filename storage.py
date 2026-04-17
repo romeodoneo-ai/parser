@@ -157,6 +157,18 @@ def get_stats() -> dict:
         }
 
 
+def get_matches_since(hours: float) -> list[dict]:
+    from datetime import timedelta
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT channel, message_id, preview, matched_keywords, matched_at "
+            "FROM matches WHERE matched_at >= ? ORDER BY matched_at DESC",
+            (since,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_recent_matches(limit: int = 5) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
