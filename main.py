@@ -71,11 +71,14 @@ async def main():
     # База данных
     storage.init_db()
 
-    # Загружаем начальные каналы и ключевые слова из config.yaml в БД
-    for ch in cfg.get("channels", []):
-        storage.add_channel(ch)
-    for kw in cfg.get("keywords", []):
-        storage.add_keyword(kw)
+    # Загружаем каналы и ключевые слова из config.yaml только при первом запуске
+    # (когда база ещё пустая — чтобы не затирать изменения сделанные через бота)
+    if not storage.get_channels() and not storage.get_keywords():
+        logger.info("Первый запуск — загружаем каналы и слова из config.yaml...")
+        for ch in cfg.get("channels", []):
+            storage.add_channel(ch)
+        for kw in cfg.get("keywords", []):
+            storage.add_keyword(kw)
 
     tg = cfg["telegram"]
 
