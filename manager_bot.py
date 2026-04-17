@@ -27,6 +27,11 @@ HELP_TEXT = """
 /add\\_kw слово — добавить ключевое слово
 /remove\\_kw слово — убрать ключевое слово
 
+**Слова-исключения** (сообщения с ними не присылаются)
+/excludes — список исключений
+/add\\_ex слово1, слово2 — добавить
+/remove\\_ex слово1, слово2 — убрать
+
 **Сайты**
 /sites — список сайтов
 /add\\_site Название https://... 20 — добавить сайт (20 = минуты)
@@ -240,6 +245,55 @@ class ManagerBot:
                     f"{link}"
                 )
                 await self.bot.send_message(uid, text, parse_mode="md", link_preview=False)
+
+        # ── Слова-исключения ─────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/excludes$"))
+        async def cmd_excludes(event):
+            keywords = storage.get_excluded_keywords()
+            if not keywords:
+                await event.respond(
+                    "Слов-исключений нет.\n\nДобавить: `/add_ex слово1, слово2`",
+                    parse_mode="md",
+                )
+                return
+            lines = "\n".join(f"• {kw}" for kw in keywords)
+            await event.respond(
+                f"🚫 **Слова-исключения** ({len(keywords)}):\n\n{lines}\n\n"
+                "Сообщения с этими словами **не присылаются**, даже если есть ключевые слова.\n"
+                "Убрать: `/remove_ex слово`",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add_ex\s+(.+)$"))
+        async def cmd_add_ex(event):
+            raw = event.pattern_match.group(1).strip()
+            keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
+            for kw in keywords:
+                storage.add_excluded_keyword(kw)
+            if len(keywords) == 1:
+                await event.respond(f"🚫 Исключение **«{keywords[0]}»** добавлено.", parse_mode="md")
+            else:
+                lines = "\n".join(f"• {kw}" for kw in keywords)
+                await event.respond(f"🚫 Добавлено исключений **{len(keywords)}**:\n\n{lines}", parse_mode="md")
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_ex\s+(.+)$"))
+        async def cmd_remove_ex(event):
+            raw = event.pattern_match.group(1).strip()
+            keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
+            removed, not_found = [], []
+            for kw in keywords:
+                if storage.remove_excluded_keyword(kw):
+                    removed.append(kw)
+                else:
+                    not_found.append(kw)
+            text = ""
+            if removed:
+                lines = "\n".join(f"• {kw}" for kw in removed)
+                text += f"✅ Удалено **{len(removed)}**:\n{lines}"
+            if not_found:
+                lines = "\n".join(f"• {kw}" for kw in not_found)
+                text += f"\n\n❌ Не найдено:\n{lines}"
+            await event.respond(text.strip(), parse_mode="md")
 
         # ── Сайты ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/sites$"))

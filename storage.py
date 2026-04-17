@@ -43,6 +43,13 @@ def init_db():
                 added_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS excluded_keywords (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword  TEXT UNIQUE NOT NULL,
+                active   INTEGER DEFAULT 1,
+                added_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS websites (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 url              TEXT UNIQUE NOT NULL,
@@ -151,6 +158,31 @@ def remove_keyword(keyword: str) -> bool:
     keyword = keyword.strip().lower()
     with get_conn() as conn:
         cursor = conn.execute("UPDATE keywords SET active=0 WHERE keyword=?", (keyword,))
+        return cursor.rowcount > 0
+
+
+# ─────────────── Слова-исключения ───────────────
+
+def get_excluded_keywords():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT keyword FROM excluded_keywords WHERE active=1").fetchall()
+        return [r["keyword"] for r in rows]
+
+def add_excluded_keyword(keyword: str):
+    keyword = keyword.strip().lower()
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO excluded_keywords (keyword, added_at) VALUES (?, ?)",
+                (keyword, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            conn.execute("UPDATE excluded_keywords SET active=1 WHERE keyword=?", (keyword,))
+
+def remove_excluded_keyword(keyword: str) -> bool:
+    keyword = keyword.strip().lower()
+    with get_conn() as conn:
+        cursor = conn.execute("UPDATE excluded_keywords SET active=0 WHERE keyword=?", (keyword,))
         return cursor.rowcount > 0
 
 
