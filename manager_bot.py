@@ -4,6 +4,7 @@
 """
 
 import logging
+import re
 from telethon import TelegramClient, events
 
 import storage
@@ -130,9 +131,16 @@ class ManagerBot:
         # ── /add_kw слово ────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add_kw\s+(.+)$"))
         async def cmd_add_kw(event):
-            keyword = event.pattern_match.group(1).strip()
-            storage.add_keyword(keyword)
-            await event.respond(f"✅ Слово **«{keyword}»** добавлено.", parse_mode="md")
+            raw = event.pattern_match.group(1).strip()
+            # Разбиваем по запятым или переносам строк
+            keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
+            for kw in keywords:
+                storage.add_keyword(kw)
+            if len(keywords) == 1:
+                await event.respond(f"✅ Слово **«{keywords[0]}»** добавлено.", parse_mode="md")
+            else:
+                lines = "\n".join(f"• {kw}" for kw in keywords)
+                await event.respond(f"✅ Добавлено **{len(keywords)}** слов:\n\n{lines}", parse_mode="md")
 
         # ── /remove_kw слово ─────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_kw\s+(.+)$"))
