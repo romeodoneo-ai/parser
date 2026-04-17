@@ -1,0 +1,13 @@
+[Unit]
+Description=Telegram Parser Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/parser
+ExecStart=/usr/bin/python3 /root/parser/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
