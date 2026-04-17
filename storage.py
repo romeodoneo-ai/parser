@@ -1,0 +1,167 @@
+"""
+Работа с базой данных (SQLite).
+Хранит: просмотренные сообщения, список каналов, ключевые слова, историю находок.
+"""
+
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
+DB_PATH = Path("data/bot.db")
+
+
+def get_conn() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Создаёт таблицы если их нет."""
+    with get_conn() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS seen_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel    TEXT    NOT NULL,
+                message_id INTEGER NOT NULL,
+                seen_at    TEXT    NOT NULL,
+                UNIQUE(channel, message_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS channels (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel  TEXT UNIQUE NOT NULL,
+                active   INTEGER DEFAULT 1,
+                added_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS keywords (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword  TEXT UNIQUE NOT NULL,
+                active   INTEGER DEFAULT 1,
+                added_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS matches (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel          TEXT NOT NULL,
+                message_id       INTEGER,
+                preview          TEXT,
+                matched_keywords TEXT,
+                matched_at       TEXT NOT NULL
+            );
+        """)
+
+
+# ─────────────── Просмотренные сообщения ───────────────
+
+def is_seen(channel: str, message_id: int) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM seen_messages WHERE channel=? AND message_id=?",
+            (channel, message_id),
+        ).fetchone()
+        return row is not None
+
+
+def mark_seen(channel: str, message_id: int):
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO seen_messages (channel, message_id, seen_at) VALUES (?, ?, ?)",
+                (channel, message_id, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            pass
+
+
+def save_match(channel: str, message_id: int, preview: str, keywords: list):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO matches (channel, message_id, preview, matched_keywords, matched_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (channel, message_id, preview[:500], ", ".join(keywords), datetime.now().isoformat()),
+        )
+
+
+# ─────────────── Каналы ───────────────
+
+def get_channels() -> list[str]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT channel FROM channels WHERE active=1").fetchall()
+        return [r["channel"] for r in rows]
+
+
+def add_channel(channel: str):
+    channel = channel.strip()
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO channels (channel, added_at) VALUES (?, ?)",
+                (channel, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            conn.execute("UPDATE channels SET active=1 WHERE channel=?", (channel,))
+
+
+def remove_channel(channel: str) -> bool:
+    channel = channel.strip()
+    with get_conn() as conn:
+        cursor = conn.execute("UPDATE channels SET active=0 WHERE channel=?", (channel,))
+        return cursor.rowcount > 0
+
+
+# ─────────────── Ключевые слова ───────────────
+
+def get_keywords() -> list[str]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT keyword FROM keywords WHERE active=1").fetchall()
+        return [r["keyword"] for r in rows]
+
+
+def add_keyword(keyword: str):
+    keyword = keyword.strip().lower()
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO keywords (keyword, added_at) VALUES (?, ?)",
+                (keyword, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            conn.execute("UPDATE keywords SET active=1 WHERE keyword=?", (keyword,))
+
+
+def remove_keyword(keyword: str) -> bool:
+    keyword = keyword.strip().lower()
+    with get_conn() as conn:
+        cursor = conn.execute("UPDATE keywords SET active=0 WHERE keyword=?", (keyword,))
+        return cursor.rowcount > 0
+
+
+# ─────────────── Статистика ───────────────
+
+def get_stats() -> dict:
+    with get_conn() as conn:
+        total_seen = conn.execute("SELECT COUNT(*) as c FROM seen_messages").fetchone()["c"]
+        total_matches = conn.execute("SELECT COUNT(*) as c FROM matches").fetchone()["c"]
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_matches = conn.execute(
+            "SELECT COUNT(*) as c FROM matches WHERE matched_at LIKE ?",
+            (f"{today}%",),
+        ).fetchone()["c"]
+        return {
+            "total_seen": total_seen,
+            "total_matches": total_matches,
+            "today_matches": today_matches,
+        }
+
+
+def get_recent_matches(limit: int = 5) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT channel, preview, matched_keywords, matched_at "
+            "FROM matches ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
