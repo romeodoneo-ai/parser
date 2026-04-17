@@ -134,7 +134,7 @@ class ManagerBot:
             )
 
         # ── /add_kw слово ────────────────────────────────────────
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add_kw\s+(.+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/add_kw\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_add_kw(event):
             raw = event.pattern_match.group(1).strip()
             # Разбиваем по запятым или переносам строк
@@ -148,7 +148,7 @@ class ManagerBot:
                 await event.respond(f"✅ Добавлено **{len(keywords)}** слов:\n\n{lines}", parse_mode="md")
 
         # ── /remove_kw слово ─────────────────────────────────────
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_kw\s+(.+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/remove_kw\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_remove_kw(event):
             raw = event.pattern_match.group(1).strip()
             keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
@@ -264,7 +264,7 @@ class ManagerBot:
                 parse_mode="md",
             )
 
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add_ex\s+(.+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/add_ex\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_add_ex(event):
             raw = event.pattern_match.group(1).strip()
             keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
@@ -276,7 +276,7 @@ class ManagerBot:
                 lines = "\n".join(f"• {kw}" for kw in keywords)
                 await event.respond(f"🚫 Добавлено исключений **{len(keywords)}**:\n\n{lines}", parse_mode="md")
 
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_ex\s+(.+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/remove_ex\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_remove_ex(event):
             raw = event.pattern_match.group(1).strip()
             keywords = [k.strip() for k in re.split(r"[,\n]+", raw) if k.strip()]
