@@ -100,17 +100,34 @@ async def main():
         proxy=proxy,
     )
 
-    # Клиент бота — отправляет уведомления и принимает команды
-    bot_client = TelegramClient(
-        "sessions/bot",
+    # Бот заказов — только присылает найденные заявки
+    notify_client = TelegramClient(
+        "sessions/notify_bot",
+        tg["api_id"],
+        tg["api_hash"],
+        proxy=proxy,
+    )
+
+    # Бот настроек — принимает команды управления
+    manager_client = TelegramClient(
+        "sessions/manager_bot",
         tg["api_id"],
         tg["api_hash"],
         proxy=proxy,
     )
 
     logger.info("Подключение к Telegram…")
-    await user_client.start()           # Попросит номер телефона при первом запуске
-    await bot_client.start(bot_token=tg["bot_token"])
+    await user_client.start()
+    await notify_client.start(bot_token=tg["bot_token"])
+
+    # Если manager_bot_token не задан — используем тот же бот
+    manager_token = tg.get("manager_bot_token", "").strip()
+    if manager_token and manager_token != "ТОКЕН_ВТОРОГО_БОТА":
+        await manager_client.start(bot_token=manager_token)
+        logger.info("Два бота запущены: заказы и настройки раздельно.")
+    else:
+        manager_client = notify_client
+        logger.info("Один бот: и заказы, и настройки (manager_bot_token не задан).")
 
     me = await user_client.get_me()
     logger.info(f"Аккаунт: {me.first_name} (@{me.username})")
@@ -118,30 +135,36 @@ async def main():
     logger.info(f"Ключевых слов:     {len(storage.get_keywords())}")
 
     # Создаём и настраиваем компоненты
-    monitor = Monitor(cfg, user_client, bot_client)
-    manager = ManagerBot(cfg, bot_client, monitor)
-    web_monitor = WebMonitor(cfg, bot_client, lambda: monitor.paused)
+    monitor = Monitor(cfg, user_client, notify_client)
+    manager = ManagerBot(cfg, manager_client, monitor)
+    web_monitor = WebMonitor(cfg, notify_client, lambda: monitor.paused)
 
     monitor.setup()
     manager.setup()
 
     # Приветственное сообщение
     try:
-        await bot_client.send_message(
+        await notify_client.send_message(
             tg["your_user_id"],
-            "✅ **Мониторинг запущен!**\n\nОтправьте /status для статистики или /help для справки.",
+            "🔔 **Бот заказов запущен.** Сюда будут приходить найденные заявки.",
             parse_mode="md",
         )
+        if manager_client != notify_client:
+            await manager_client.send_message(
+                tg["your_user_id"],
+                "⚙️ **Бот настроек запущен.**\n\nОтправьте /help для списка команд.",
+                parse_mode="md",
+            )
     except Exception:
-        pass  # Если пользователь ещё не написал боту — нестрашно
+        pass
 
     logger.info("Мониторинг запущен. Ожидаем сообщения…")
 
-    await asyncio.gather(
-        user_client.run_until_disconnected(),
-        bot_client.run_until_disconnected(),
-        web_monitor.run(),
-    )
+    clients = [user_client.run_until_disconnected(), notify_client.run_until_disconnected(), web_monitor.run()]
+    if manager_client != notify_client:
+        clients.append(manager_client.run_until_disconnected())
+
+    await asyncio.gather(*clients)
 
 
 if __name__ == "__main__":
