@@ -2,6 +2,8 @@ from .fl import FlParser
 from .pchel import PchelParser
 from .freelancejob import FreelancejobParser
 from .freelance_ru import FreelanceRuParser
+from .weblancer import WeblancerParser
+from .youdo import YoudoParser
 
 # Реестр парсеров: домен → класс
 REGISTRY = {
@@ -9,6 +11,8 @@ REGISTRY = {
     "pchel.net":       PchelParser,
     "freelancejob.ru": FreelancejobParser,
     "freelance.ru":    FreelanceRuParser,
+    "weblancer.net":   WeblancerParser,
+    "youdo.com":       YoudoParser,
 }
 
 def get_parser(url: str):
