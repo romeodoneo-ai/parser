@@ -71,15 +71,21 @@ async def check_site(session: aiohttp.ClientSession, site: dict, bot_client, use
 
         # Контент изменился — ищем ключевые слова
         storage.set_web_hash(url, new_hash)
-        matched, keywords = filters.is_match(text)
 
-        if not matched:
-            logger.info(f"[{name}] Страница обновилась, но ключевых слов нет.")
-            return
+        # Фильтр по ключевым словам (если включён)
+        if storage.web_keywords_enabled():
+            matched, keywords = filters.is_match(text)
+            if not matched:
+                logger.info(f"[{name}] Страница обновилась, но ключевых слов нет.")
+                return
+        else:
+            # Ключевые слова отключены — собираем просто для отображения в карточке
+            _, keywords = filters.is_match(text)
+            keywords = keywords or ["без фильтра"]
 
         # Фильтр контактов для сайтов (если включён)
         if storage.contacts_filter_web_enabled() and not filters.has_contacts(text):
-            logger.info(f"[{name}] Найдены ключевые слова, но нет контактов — пропускаем.")
+            logger.info(f"[{name}] Нет контактов — пропускаем.")
             return
 
         logger.info(f"[{name}] Найдено обновление! Слова: {keywords}")

@@ -181,6 +181,12 @@ def set_setting(key: str, value: str):
             (key, value),
         )
 
+def web_keywords_enabled() -> bool:
+    return get_setting("web_keywords", "1") == "1"
+
+def set_web_keywords(enabled: bool):
+    set_setting("web_keywords", "1" if enabled else "0")
+
 def contacts_filter_web_enabled() -> bool:
     return get_setting("contacts_filter_web", "0") == "1"
 

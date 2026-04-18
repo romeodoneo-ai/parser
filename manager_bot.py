@@ -40,12 +40,14 @@ HELP_TEXT = """
 /remove_site Название — убрать по названию
 /remove_site https://... — убрать по ссылке
 
-**Фильтр контактов**
-/contacts — статус фильтра
-/contacts_web_on — включить для сайтов
-/contacts_web_off — выключить для сайтов
-/contacts_tg_on — включить для Telegram
-/contacts_tg_off — выключить для Telegram
+**Фильтры**
+/contacts — все настройки фильтрации
+/web_kw_on — ключевые слова для сайтов вкл
+/web_kw_off — ключевые слова для сайтов выкл
+/contacts_web_on — контакты для сайтов вкл
+/contacts_web_off — контакты для сайтов выкл
+/contacts_tg_on — контакты для Telegram вкл
+/contacts_tg_off — контакты для Telegram выкл
 
 **Управление**
 /pause — приостановить
@@ -201,16 +203,38 @@ class ManagerBot:
         # ── Фильтр контактов ─────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts$"))
         async def cmd_contacts_status(event):
-            web = "✅ вкл" if storage.contacts_filter_web_enabled() else "❌ выкл"
-            tg  = "✅ вкл" if storage.contacts_filter_tg_enabled()  else "❌ выкл"
+            web_contacts = "✅ вкл" if storage.contacts_filter_web_enabled() else "❌ выкл"
+            tg_contacts  = "✅ вкл" if storage.contacts_filter_tg_enabled()  else "❌ выкл"
+            web_kw       = "✅ вкл" if storage.web_keywords_enabled()         else "❌ выкл"
             await event.respond(
-                f"📞 **Фильтр контактов**\n\n"
-                f"🌐 Сайты:   {web}\n"
-                f"✈️ Telegram: {tg}\n\n"
-                "Когда включён — приходят только заявки где есть:\n"
-                "ссылка, @telegram, телефон или email\n\n"
-                "/contacts_web_on  /contacts_web_off — для сайтов\n"
-                "/contacts_tg_on   /contacts_tg_off  — для Telegram",
+                f"⚙️ **Настройки фильтрации сайтов**\n\n"
+                f"🔑 Ключевые слова: {web_kw}\n"
+                f"📞 Фильтр контактов: {web_contacts}\n"
+                f"/web_kw_on — /web_kw_off\n"
+                f"/contacts_web_on — /contacts_web_off\n\n"
+                f"⚙️ **Настройки фильтрации Telegram**\n\n"
+                f"📞 Фильтр контактов: {tg_contacts}\n"
+                f"/contacts_tg_on — /contacts_tg_off\n\n"
+                "Фильтр контактов — приходят только заявки где есть:\n"
+                "ссылка, @telegram, телефон или email",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/web_kw_on$"))
+        async def cmd_web_kw_on(event):
+            storage.set_web_keywords(True)
+            await event.respond(
+                "✅ Ключевые слова для сайтов **включены**.\n"
+                "Присылаются только совпадения по ключевым словам.",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/web_kw_off$"))
+        async def cmd_web_kw_off(event):
+            storage.set_web_keywords(False)
+            await event.respond(
+                "❌ Ключевые слова для сайтов **выключены**.\n"
+                "Присылаются все обновления страниц (только контакты, если фильтр включён).",
                 parse_mode="md",
             )
 
