@@ -98,24 +98,38 @@ class ManagerBot:
             )
 
         # ── /add @channel ────────────────────────────────────────
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add\s+(\S+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/add\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_add_channel(event):
-            channel = event.pattern_match.group(1)
-            storage.add_channel(channel)
-            await event.respond(f"✅ Канал **{channel}** добавлен.", parse_mode="md")
-            logger.info(f"Добавлен канал: {channel}")
+            raw = event.pattern_match.group(1).strip()
+            channels = [c.strip() for c in re.split(r"[,\n]+", raw) if c.strip()]
+            for ch in channels:
+                storage.add_channel(ch)
+            if len(channels) == 1:
+                await event.respond(f"✅ Канал **{channels[0]}** добавлен.", parse_mode="md")
+            else:
+                lines = "\n".join(f"• {ch}" for ch in channels)
+                await event.respond(f"✅ Добавлено каналов **{len(channels)}**:\n\n{lines}", parse_mode="md")
+            logger.info(f"Добавлены каналы: {channels}")
 
         # ── /remove @channel ─────────────────────────────────────
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove\s+(\S+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/remove\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_remove_channel(event):
-            channel = event.pattern_match.group(1)
-            if storage.remove_channel(channel):
-                await event.respond(f"✅ Канал **{channel}** удалён.", parse_mode="md")
-                logger.info(f"Удалён канал: {channel}")
-            else:
-                await event.respond(
-                    f"❌ Канал **{channel}** не найден в списке.", parse_mode="md"
-                )
+            raw = event.pattern_match.group(1).strip()
+            channels = [c.strip() for c in re.split(r"[,\n]+", raw) if c.strip()]
+            removed, not_found = [], []
+            for ch in channels:
+                if storage.remove_channel(ch):
+                    removed.append(ch)
+                else:
+                    not_found.append(ch)
+            text = ""
+            if removed:
+                lines = "\n".join(f"• {ch}" for ch in removed)
+                text += f"✅ Удалено **{len(removed)}**:\n{lines}"
+            if not_found:
+                lines = "\n".join(f"• {ch}" for ch in not_found)
+                text += f"\n\n❌ Не найдено:\n{lines}"
+            await event.respond(text.strip(), parse_mode="md")
 
         # ── /keywords ────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/keywords$"))
