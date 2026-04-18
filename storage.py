@@ -242,6 +242,11 @@ def remove_website(url: str) -> bool:
         cursor = conn.execute("UPDATE websites SET active=0 WHERE url=?", (url.strip(),))
         return cursor.rowcount > 0
 
+def remove_website_by_name(name: str) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute("UPDATE websites SET active=0 WHERE LOWER(name)=LOWER(?)", (name.strip(),))
+        return cursor.rowcount > 0
+
 def get_web_hash(url: str):
     with get_conn() as conn:
         row = conn.execute("SELECT content_hash FROM web_hashes WHERE url=?", (url,)).fetchone()

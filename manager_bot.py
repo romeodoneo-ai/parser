@@ -15,37 +15,43 @@ HELP_TEXT = """
 👋 **Бот мониторинга заказов**
 
 **Статус и статистика**
-/status — показать статистику и состояние
+/status — статистика и состояние
+/recent — последние 5 находок
+/report 24h — отчёт за период (1h 6h 12h 24h 3d 7d)
 
 **Каналы**
-/channels — список отслеживаемых каналов
-/add @channel — добавить канал
-/remove @channel — убрать канал
+/channels — список каналов
+/add @channel1, @channel2 — добавить
+/remove @channel1, @channel2 — убрать
 
 **Ключевые слова**
-/keywords — список ключевых слов
-/add\\_kw слово — добавить ключевое слово
-/remove\\_kw слово — убрать ключевое слово
+/keywords — список слов
+/add_kw слово1, слово2 — добавить
+/remove_kw слово1, слово2 — убрать
 
-**Слова-исключения** (сообщения с ними не присылаются)
+**Слова-исключения**
 /excludes — список исключений
-/add\\_ex слово1, слово2 — добавить
-/remove\\_ex слово1, слово2 — убрать
+/add_ex слово1, слово2 — добавить
+/remove_ex слово1, слово2 — убрать
 
 **Сайты**
 /sites — список сайтов
-/add\\_site Название https://... 20 — добавить сайт (20 = минуты)
-/remove\\_site https://... — убрать сайт
+/add_site Название https://... 20 — добавить (20 = минуты)
+/remove_site Название — убрать по названию
+/remove_site https://... — убрать по ссылке
 
 **Фильтр контактов**
-/contacts — статус
-/contacts\\_web\\_on/off — для сайтов
-/contacts\\_tg\\_on/off — для Telegram
+/contacts — статус фильтра
+/contacts_web_on — включить для сайтов
+/contacts_web_off — выключить для сайтов
+/contacts_tg_on — включить для Telegram
+/contacts_tg_off — выключить для Telegram
 
 **Управление**
-/pause — приостановить всё
+/pause — приостановить
 /resume — возобновить
-/recent — последние 5 находок
+/test — проверить что бот работает
+/getid — узнать ID закрытого канала
 
 /help — показать эту справку
 """.strip()
@@ -203,8 +209,8 @@ class ManagerBot:
                 f"✈️ Telegram: {tg}\n\n"
                 "Когда включён — приходят только заявки где есть:\n"
                 "ссылка, @telegram, телефон или email\n\n"
-                "/contacts\\_web\\_on / off — для сайтов\n"
-                "/contacts\\_tg\\_on / off  — для Telegram",
+                "/contacts_web_on  /contacts_web_off — для сайтов\n"
+                "/contacts_tg_on   /contacts_tg_off  — для Telegram",
                 parse_mode="md",
             )
 
@@ -366,36 +372,62 @@ class ManagerBot:
             sites = storage.get_websites()
             if not sites:
                 await event.respond(
-                    "Сайтов нет.\n\nДобавить:\n`/add_site Название https://example.com 20`\n(последнее число — интервал проверки в минутах)",
+                    "Сайтов нет.\n\n"
+                    "Добавить:\n`/add_site Название https://example.com 20`\n"
+                    "(20 — интервал проверки в минутах)\n\n"
+                    "Можно несколько сразу — каждый с новой строки.",
                     parse_mode="md",
                 )
                 return
-            lines = [f"• [{s['name']}]({s['url']}) — каждые {s['interval_minutes']} мин." for s in sites]
+            lines = [f"• **{s['name']}** — каждые {s['interval_minutes']} мин.\n  {s['url']}" for s in sites]
             await event.respond(
-                f"🌐 **Отслеживаемые сайты** ({len(sites)}):\n\n" + "\n".join(lines) +
-                "\n\nУбрать: `/remove_site https://...`",
+                f"🌐 **Отслеживаемые сайты** ({len(sites)}):\n\n" + "\n\n".join(lines) +
+                "\n\nДобавить: `/add_site Название https://... 20`"
+                "\nУбрать: `/remove_site Название`",
                 parse_mode="md",
                 link_preview=False,
             )
 
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/add_site (.+?) (https?://\S+)(?: (\d+))?$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/add_site\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_add_site(event):
-            name = event.pattern_match.group(1).strip()
-            url = event.pattern_match.group(2).strip()
-            minutes = int(event.pattern_match.group(3) or 20)
-            storage.add_website(url, name, minutes)
-            await event.respond(
-                f"✅ Сайт **{name}** добавлен.\nПроверка каждые {minutes} минут.",
-                parse_mode="md",
-            )
+            raw = event.pattern_match.group(1).strip()
+            lines = [l.strip() for l in raw.splitlines() if l.strip()]
+            added, errors = [], []
+            for line in lines:
+                # Формат: Название https://url.com 20
+                m = re.match(r"^(.+?)\s+(https?://\S+)(?:\s+(\d+))?$", line)
+                if m:
+                    name = m.group(1).strip()
+                    url = m.group(2).strip()
+                    minutes = int(m.group(3) or 20)
+                    storage.add_website(url, name, minutes)
+                    added.append(f"**{name}** — каждые {minutes} мин.")
+                else:
+                    errors.append(f"• `{line}` — неверный формат")
+            text = ""
+            if added:
+                text += "✅ Добавлено:\n" + "\n".join(f"• {a}" for a in added)
+            if errors:
+                text += "\n\n❌ Ошибки (формат: Название https://... 20):\n" + "\n".join(errors)
+            await event.respond(text.strip(), parse_mode="md")
 
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/remove_site (https?://\S+)$"))
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/remove_site\s+([\s\S]+)", re.IGNORECASE)))
         async def cmd_remove_site(event):
-            url = event.pattern_match.group(1).strip()
-            if storage.remove_website(url):
-                await event.respond("✅ Сайт удалён.")
-            else:
-                await event.respond("❌ Сайт не найден.")
+            raw = event.pattern_match.group(1).strip()
+            items = [i.strip() for i in re.split(r"[,\n]+", raw) if i.strip()]
+            removed, not_found = [], []
+            for item in items:
+                # Пробуем удалить по URL или по названию
+                if storage.remove_website(item) or storage.remove_website_by_name(item):
+                    removed.append(item)
+                else:
+                    not_found.append(item)
+            text = ""
+            if removed:
+                text += "✅ Удалено:\n" + "\n".join(f"• {i}" for i in removed)
+            if not_found:
+                text += "\n\n❌ Не найдено:\n" + "\n".join(f"• {i}" for i in not_found)
+            await event.respond(text.strip(), parse_mode="md")
 
         # ── /getid ───────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/getid$"))
