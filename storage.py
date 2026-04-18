@@ -43,6 +43,11 @@ def init_db():
                 added_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS excluded_keywords (
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 keyword  TEXT UNIQUE NOT NULL,
@@ -159,6 +164,28 @@ def remove_keyword(keyword: str) -> bool:
     with get_conn() as conn:
         cursor = conn.execute("UPDATE keywords SET active=0 WHERE keyword=?", (keyword,))
         return cursor.rowcount > 0
+
+
+# ─────────────── Настройки ───────────────
+
+def get_setting(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+def set_setting(key: str, value: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+def contacts_filter_enabled() -> bool:
+    return get_setting("contacts_filter", "0") == "1"
+
+def set_contacts_filter(enabled: bool):
+    set_setting("contacts_filter", "1" if enabled else "0")
 
 
 # ─────────────── Слова-исключения ───────────────

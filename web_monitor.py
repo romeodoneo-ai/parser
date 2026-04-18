@@ -77,6 +77,11 @@ async def check_site(session: aiohttp.ClientSession, site: dict, bot_client, use
             logger.info(f"[{name}] Страница обновилась, но ключевых слов нет.")
             return
 
+        # Фильтр контактов (если включён)
+        if storage.contacts_filter_enabled() and not filters.has_contacts(text):
+            logger.info(f"[{name}] Найдены ключевые слова, но нет контактов — пропускаем.")
+            return
+
         logger.info(f"[{name}] Найдено обновление! Слова: {keywords}")
 
         # Формируем уведомление

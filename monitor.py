@@ -68,6 +68,11 @@ class Monitor:
             if channel_username:
                 message_link = f"https://t.me/{channel_username}/{msg_id}"
 
+            # Фильтр контактов (если включён)
+            if storage.contacts_filter_enabled() and not filters.has_contacts(text):
+                logger.info(f"Ключевые слова есть, но нет контактов — пропускаем.")
+                return
+
             # Сохраняем находку в историю
             storage.save_match(chat_id, msg_id, text, keywords)
 

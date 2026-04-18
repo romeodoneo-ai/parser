@@ -37,6 +37,11 @@ HELP_TEXT = """
 /add\\_site Название https://... 20 — добавить сайт (20 = минуты)
 /remove\\_site https://... — убрать сайт
 
+**Фильтр контактов**
+/contacts — статус фильтра
+/contacts\\_on — только заявки с контактами
+/contacts\\_off — все совпадения
+
 **Управление**
 /pause — приостановить всё
 /resume — возобновить
@@ -186,6 +191,40 @@ class ManagerBot:
                 lines = "\n".join(f"• {kw}" for kw in not_found)
                 text += f"\n\n❌ Не найдено:\n{lines}"
             await event.respond(text.strip(), parse_mode="md")
+
+        # ── Фильтр контактов ─────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts$"))
+        async def cmd_contacts_status(event):
+            enabled = storage.contacts_filter_enabled()
+            status = "✅ Включён" if enabled else "❌ Выключен"
+            await event.respond(
+                f"📞 **Фильтр контактов:** {status}\n\n"
+                "Когда включён — присылаются только сообщения в которых есть:\n"
+                "• Ссылка (http/https)\n"
+                "• Telegram (@username или t.me/...)\n"
+                "• Номер телефона\n"
+                "• Email\n\n"
+                "/contacts\\_on — включить\n"
+                "/contacts\\_off — выключить",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_on$"))
+        async def cmd_contacts_on(event):
+            storage.set_contacts_filter(True)
+            await event.respond(
+                "✅ Фильтр контактов **включён**.\n\n"
+                "Теперь приходят только заявки со ссылкой, телефоном или Telegram.",
+                parse_mode="md",
+            )
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_off$"))
+        async def cmd_contacts_off(event):
+            storage.set_contacts_filter(False)
+            await event.respond(
+                "❌ Фильтр контактов **выключен**.\n\nПриходят все совпадения.",
+                parse_mode="md",
+            )
 
         # ── /pause ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/pause$"))
