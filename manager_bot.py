@@ -38,9 +38,9 @@ HELP_TEXT = """
 /remove\\_site https://... — убрать сайт
 
 **Фильтр контактов**
-/contacts — статус фильтра
-/contacts\\_on — только заявки с контактами
-/contacts\\_off — все совпадения
+/contacts — статус
+/contacts\\_web\\_on/off — для сайтов
+/contacts\\_tg\\_on/off — для Telegram
 
 **Управление**
 /pause — приостановить всё
@@ -195,36 +195,38 @@ class ManagerBot:
         # ── Фильтр контактов ─────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts$"))
         async def cmd_contacts_status(event):
-            enabled = storage.contacts_filter_enabled()
-            status = "✅ Включён" if enabled else "❌ Выключен"
+            web = "✅ вкл" if storage.contacts_filter_web_enabled() else "❌ выкл"
+            tg  = "✅ вкл" if storage.contacts_filter_tg_enabled()  else "❌ выкл"
             await event.respond(
-                f"📞 **Фильтр контактов:** {status}\n\n"
-                "Когда включён — присылаются только сообщения в которых есть:\n"
-                "• Ссылка (http/https)\n"
-                "• Telegram (@username или t.me/...)\n"
-                "• Номер телефона\n"
-                "• Email\n\n"
-                "/contacts\\_on — включить\n"
-                "/contacts\\_off — выключить",
+                f"📞 **Фильтр контактов**\n\n"
+                f"🌐 Сайты:   {web}\n"
+                f"✈️ Telegram: {tg}\n\n"
+                "Когда включён — приходят только заявки где есть:\n"
+                "ссылка, @telegram, телефон или email\n\n"
+                "/contacts\\_web\\_on / off — для сайтов\n"
+                "/contacts\\_tg\\_on / off  — для Telegram",
                 parse_mode="md",
             )
 
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_on$"))
-        async def cmd_contacts_on(event):
-            storage.set_contacts_filter(True)
-            await event.respond(
-                "✅ Фильтр контактов **включён**.\n\n"
-                "Теперь приходят только заявки со ссылкой, телефоном или Telegram.",
-                parse_mode="md",
-            )
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_web_on$"))
+        async def cmd_contacts_web_on(event):
+            storage.set_contacts_filter_web(True)
+            await event.respond("✅ Фильтр контактов для **сайтов** включён.", parse_mode="md")
 
-        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_off$"))
-        async def cmd_contacts_off(event):
-            storage.set_contacts_filter(False)
-            await event.respond(
-                "❌ Фильтр контактов **выключен**.\n\nПриходят все совпадения.",
-                parse_mode="md",
-            )
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_web_off$"))
+        async def cmd_contacts_web_off(event):
+            storage.set_contacts_filter_web(False)
+            await event.respond("❌ Фильтр контактов для **сайтов** выключен.", parse_mode="md")
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_tg_on$"))
+        async def cmd_contacts_tg_on(event):
+            storage.set_contacts_filter_tg(True)
+            await event.respond("✅ Фильтр контактов для **Telegram** включён.", parse_mode="md")
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts_tg_off$"))
+        async def cmd_contacts_tg_off(event):
+            storage.set_contacts_filter_tg(False)
+            await event.respond("❌ Фильтр контактов для **Telegram** выключен.", parse_mode="md")
 
         # ── /pause ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/pause$"))

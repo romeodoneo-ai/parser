@@ -181,11 +181,17 @@ def set_setting(key: str, value: str):
             (key, value),
         )
 
-def contacts_filter_enabled() -> bool:
-    return get_setting("contacts_filter", "0") == "1"
+def contacts_filter_web_enabled() -> bool:
+    return get_setting("contacts_filter_web", "0") == "1"
 
-def set_contacts_filter(enabled: bool):
-    set_setting("contacts_filter", "1" if enabled else "0")
+def set_contacts_filter_web(enabled: bool):
+    set_setting("contacts_filter_web", "1" if enabled else "0")
+
+def contacts_filter_tg_enabled() -> bool:
+    return get_setting("contacts_filter_tg", "0") == "1"
+
+def set_contacts_filter_tg(enabled: bool):
+    set_setting("contacts_filter_tg", "1" if enabled else "0")
 
 
 # ─────────────── Слова-исключения ───────────────
