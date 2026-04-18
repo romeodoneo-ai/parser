@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:youdo.com)",
+      "WebSearch",
+      "WebFetch(domain:www.fl.ru)",
+      "WebFetch(domain:pchel.net)",
+      "WebFetch(domain:www.weblancer.net)",
+      "WebFetch(domain:www.freelancejob.ru)",
+      "WebFetch(domain:freelance.ru)"
+    ]
+  }
+}

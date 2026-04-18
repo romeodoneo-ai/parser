@@ -70,6 +70,12 @@ def init_db():
                 checked_at   TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS seen_web_tasks (
+                task_url  TEXT PRIMARY KEY,
+                site_name TEXT NOT NULL,
+                seen_at   TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS matches (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel          TEXT NOT NULL,
@@ -257,6 +263,21 @@ def get_web_hash(url: str):
     with get_conn() as conn:
         row = conn.execute("SELECT content_hash FROM web_hashes WHERE url=?", (url,)).fetchone()
         return row["content_hash"] if row else None
+
+def is_web_task_seen(task_url: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute("SELECT 1 FROM seen_web_tasks WHERE task_url=?", (task_url,)).fetchone()
+        return row is not None
+
+def mark_web_task_seen(task_url: str, site_name: str):
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO seen_web_tasks (task_url, site_name, seen_at) VALUES (?, ?, ?)",
+                (task_url, site_name, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            pass
 
 def set_web_hash(url: str, content_hash: str):
     with get_conn() as conn:
