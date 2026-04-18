@@ -36,10 +36,21 @@ class WeblancerParser(BaseParser):
                 )
                 page = await context.new_page()
 
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(3000)  # ждём подгрузки JS
+                await page.goto(url, wait_until="networkidle", timeout=40000)
+                await page.wait_for_timeout(4000)
+
+                # Прокрутка для ленивой загрузки
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                await page.wait_for_timeout(2000)
 
                 html = await page.content()
+
+                # Для отладки — логируем что нашлось на странице
+                soup_debug = BeautifulSoup(html, "html.parser")
+                all_divs = soup_debug.find_all("div", class_=True)
+                classes = list({c for d in all_divs[:50] for c in d.get("class", [])})
+                logger.info(f"[Weblancer] Классы на странице: {classes[:30]}")
+
                 await browser.close()
 
         except Exception as e:
@@ -49,12 +60,16 @@ class WeblancerParser(BaseParser):
         soup  = BeautifulSoup(html, "html.parser")
         tasks = []
 
-        # Weblancer: карточки проектов
+        # Weblancer: пробуем все возможные селекторы
         cards = (
             soup.select("div.cols-table_item") or
-            soup.select("div.item[class*='project']") or
+            soup.select("div[class*='cols-table']") or
             soup.select("div[class*='vacancy']") or
-            soup.select("div.b-vacancy-list__item") or
+            soup.select("div[class*='project']") or
+            soup.select("div[class*='job']") or
+            soup.select("li[class*='vacancy']") or
+            soup.select("li[class*='project']") or
+            soup.select("article") or
             []
         )
 
