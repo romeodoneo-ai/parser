@@ -279,6 +279,11 @@ def mark_web_task_seen(task_url: str, site_name: str):
         except sqlite3.IntegrityError:
             pass
 
+def clear_seen_web_tasks():
+    """Сбрасывает историю просмотренных заказов (для повторной проверки)."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM seen_web_tasks")
+
 def set_web_hash(url: str, content_hash: str):
     with get_conn() as conn:
         conn.execute(

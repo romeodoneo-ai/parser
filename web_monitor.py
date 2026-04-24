@@ -26,7 +26,23 @@ HEADERS = {
 }
 
 
-def format_task_notification(task: dict, site_name: str) -> str:
+async def fetch_full_text(session, url: str) -> str:
+    """Загружает страницу заказа и возвращает чистый текст (без HTML-тегов)."""
+    try:
+        async with session.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            if resp.status != 200:
+                return ""
+            html = await resp.text()
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "meta", "link"]):
+            tag.decompose()
+        return " ".join(soup.get_text(" ").split())
+    except Exception as e:
+        logger.debug(f"Не удалось загрузить детали заказа {url}: {e}")
+        return ""
+
+
+def format_task_notification(task: dict, site_name: str, contacts: str = "") -> str:
     """Форматирует карточку найденного заказа."""
     lines = [f"🔔 **Новый заказ — {site_name}**", ""]
 
@@ -45,6 +61,10 @@ def format_task_notification(task: dict, site_name: str) -> str:
         lines.append("")
         lines.append(desc)
 
+    if contacts:
+        lines.append("")
+        lines.append(f"📞 {contacts}")
+
     lines.append("")
     lines.append(f"[🔗 Открыть заказ]({task['url']})")
 
@@ -55,6 +75,9 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
     """Проверяет сайт через специализированный парсер — по одному заказу."""
     url  = site["url"]
     name = site["name"]
+
+    need_contacts = storage.contacts_filter_web_enabled()
+    need_keywords = storage.web_keywords_enabled()
 
     try:
         tasks = await parser.get_tasks(session, url)
@@ -76,23 +99,45 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             storage.mark_web_task_seen(task_url, name)
             new_count += 1
 
-            text = (task.get("title", "") + " " + task.get("description", "")).strip()
+            # Текст с листинга (короткий)
+            listing_text = (task.get("title", "") + " " + task.get("description", "")).strip()
+
+            # Если нужны контакты, но в листинге их нет — загружаем страницу заказа
+            if need_contacts and not filters.has_contacts(listing_text):
+                await asyncio.sleep(0.8)
+                detail_text = await fetch_full_text(session, task_url)
+                text = detail_text if len(detail_text) > len(listing_text) else listing_text
+            else:
+                text = listing_text
 
             # Фильтр по ключевым словам (если включён)
-            if storage.web_keywords_enabled():
+            if need_keywords:
                 matched, keywords = filters.is_match(text)
                 if not matched:
-                    continue
+                    # Попробуем ещё раз с детальной страницей, если не загружали
+                    if text == listing_text and task_url:
+                        await asyncio.sleep(0.8)
+                        detail_text = await fetch_full_text(session, task_url)
+                        if detail_text:
+                            matched, keywords = filters.is_match(detail_text)
+                            if matched:
+                                text = detail_text
+                    if not matched:
+                        continue
             else:
                 _, keywords = filters.is_match(text)
 
             # Фильтр контактов (если включён)
-            if storage.contacts_filter_web_enabled() and not filters.has_contacts(text):
+            if need_contacts and not filters.has_contacts(text):
+                logger.debug(f"[{name}] Нет контактов: {task.get('title', '')[:50]}")
                 continue
 
+            # Собираем найденные контакты для уведомления
+            contacts_str = filters.extract_contact_context(text)
+
             # Сохраняем и отправляем
-            storage.save_match(task_url, None, text[:500], keywords or ["веб"])
-            notification = format_task_notification(task, name)
+            storage.save_match(task_url, None, listing_text[:500], keywords or ["веб"])
+            notification = format_task_notification(task, name, contacts_str)
 
             await bot_client.send_message(user_id, notification, parse_mode="md", link_preview=False)
             logger.info(f"[{name}] ✅ Новый заказ: {task.get('title', '')[:60]}")

@@ -52,6 +52,7 @@ HELP_TEXT = """
 **Управление**
 /pause — приостановить
 /resume — возобновить
+/reset_web — сбросить историю веб-заказов (перепроверить заново)
 /test — проверить что бот работает
 /getid — узнать ID закрытого канала
 
@@ -479,6 +480,16 @@ class ManagerBot:
                 )
             else:
                 await event.respond("Не удалось определить ID этого канала.")
+
+        # ── /reset_web ────────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/reset_web$"))
+        async def cmd_reset_web(event):
+            storage.clear_seen_web_tasks()
+            await event.respond(
+                "🔄 История просмотренных веб-заказов **сброшена**.\n\n"
+                "На следующей проверке все заказы будут проанализированы заново.",
+                parse_mode="md",
+            )
 
         # ── /test ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/test$"))
