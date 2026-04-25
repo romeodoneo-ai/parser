@@ -84,15 +84,6 @@ def format_task_notification(task: dict, site_name: str, contacts: str = "") -> 
     if task.get("budget"):
         lines.append(f"💰 {task['budget']}")
 
-    offers = task.get("offers_count", -1)
-    if offers == 0:
-        lines.append("🔥 Откликов: 0 — первый!")
-    elif offers > 0:
-        lines.append(f"👥 Откликов: {offers}")
-
-    if task.get("is_sbr"):
-        lines.append("🔒 Безопасная сделка")
-
     if task.get("date"):
         lines.append(f"📅 {task['date']}")
 

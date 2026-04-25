@@ -254,10 +254,7 @@ def add_website(url: str, name: str, interval_minutes: int = 20):
                 (url, name, interval_minutes, datetime.now().isoformat()),
             )
         except sqlite3.IntegrityError:
-            conn.execute(
-                "UPDATE websites SET active=1, interval_minutes=? WHERE url=?",
-                (interval_minutes, url),
-            )
+            conn.execute("UPDATE websites SET active=1 WHERE url=?", (url,))
 
 def remove_website(url: str) -> bool:
     with get_conn() as conn:

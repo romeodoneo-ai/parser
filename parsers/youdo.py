@@ -9,7 +9,6 @@ ID для IT/разработки получены из реального бр�
 import re
 import json
 import uuid
-import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 from .base import BaseParser, HEADERS, logger
@@ -74,43 +73,28 @@ class YoudoParser(BaseParser):
         return []
 
     async def _fetch_via_post(self, session) -> list:
-        all_tasks = []
-        page = 1
-        while True:
-            payload = _build_payload(page)
-            try:
-                async with session.post(
-                    API_URL,
-                    headers=API_HEADERS,
-                    data=json.dumps(payload),
-                    timeout=aiohttp.ClientTimeout(total=20),
-                ) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"[YouDo] POST API вернул {resp.status}")
-                        break
-                    ct = resp.headers.get("content-type", "")
-                    if "json" not in ct:
-                        break
-                    data = await resp.json(content_type=None)
-            except Exception as e:
-                logger.error(f"[YouDo] POST API ошибка (стр. {page}): {e}")
-                break
-
-            tasks = self._extract_from_json(data)
-            if not tasks:
-                break
-            all_tasks.extend(tasks)
-
-            ro = (data.get("ResultObject") or {})
-            total = ro.get("Total") or 0
-            items_on_page = ro.get("ItemsOnPage") or 50
-            if len(all_tasks) >= total or len(tasks) < items_on_page:
-                break
-            page += 1
-            await asyncio.sleep(0.5)
-
-        logger.info(f"[YouDo] POST API → {len(all_tasks)} IT-заданий ({page} стр.)")
-        return all_tasks
+        payload = _build_payload()
+        try:
+            async with session.post(
+                API_URL,
+                headers=API_HEADERS,
+                data=json.dumps(payload),
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(f"[YouDo] POST API вернул {resp.status}")
+                    return []
+                ct = resp.headers.get("content-type", "")
+                if "json" not in ct:
+                    logger.warning(f"[YouDo] POST API неожиданный content-type: {ct}")
+                    return []
+                data = await resp.json(content_type=None)
+                tasks = self._extract_from_json(data)
+                logger.info(f"[YouDo] POST API → {len(tasks)} IT-заданий")
+                return tasks
+        except Exception as e:
+            logger.error(f"[YouDo] POST API ошибка: {e}")
+            return []
 
     async def _fetch_via_playwright(self, url: str) -> list:
         captured_tasks = []
@@ -251,14 +235,12 @@ class YoudoParser(BaseParser):
         )[:10]
 
         return {
-            "id":           task_id,
-            "title":        title,
-            "description":  description,
-            "budget":       budget,
-            "date":         date,
-            "url":          task_url,
-            "offers_count": int(item.get("OffersCount") or 0),
-            "is_sbr":       bool(item.get("IsSbr")),
+            "id":          task_id,
+            "title":       title,
+            "description": description,
+            "budget":      budget,
+            "date":        date,
+            "url":         task_url,
         }
 
     async def enrich_task(self, session, task: dict) -> dict:
