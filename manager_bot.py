@@ -38,9 +38,10 @@ HELP_TEXT = """
 /sites — список сайтов
 /add_site Название https://... 20 — добавить (20 = минуты)
 /remove_site Название — убрать по названию
-/remove_site https://... — убрать по ссылке
+/site_interval Название 10 — изменить интервал (мин.)
 /site_raw_on Название — все заказы без фильтров
 /site_raw_off Название — вернуть фильтры
+/site_report Название — отчёт за 24ч (можно указать часы: /site_report FL.ru 48)
 
 **Фильтры**
 /contacts — все настройки фильтрации
@@ -414,8 +415,10 @@ class ManagerBot:
                 f"🌐 **Отслеживаемые сайты** ({len(sites)}):\n\n" + "\n\n".join(lines) +
                 "\n\nДобавить: `/add_site Название https://... 20`"
                 "\nУбрать: `/remove_site Название`"
+                "\nИзменить интервал: `/site_interval Название 10`"
                 "\nВсе заказы без фильтров: `/site_raw_on Название`"
-                "\nВернуть фильтры: `/site_raw_off Название`",
+                "\nВернуть фильтры: `/site_raw_off Название`"
+                "\nОтчёт за 24ч: `/site_report Название`",
                 parse_mode="md",
                 link_preview=False,
             )
@@ -521,6 +524,79 @@ class ManagerBot:
                 )
             else:
                 await event.respond(f"❌ Сайт «{name}» не найден. Проверь название через /sites")
+
+        # ── /site_interval ────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/site_interval (.+?) (\d+)$"))
+        async def cmd_site_interval(event):
+            name    = event.pattern_match.group(1).strip()
+            minutes = int(event.pattern_match.group(2))
+            if minutes < 1:
+                await event.respond("❌ Минимальный интервал — 1 минута.")
+                return
+            if storage.set_site_interval(name, minutes):
+                await event.respond(
+                    f"✅ Сайт **{name}**: интервал изменён на **{minutes} мин.**",
+                    parse_mode="md",
+                )
+            else:
+                await event.respond(f"❌ Сайт «{name}» не найден. Проверь название через /sites")
+
+        # ── /site_report ──────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/site_report (.+?)(?:\s+(\d+))?$"))
+        async def cmd_site_report(event):
+            name  = event.pattern_match.group(1).strip()
+            hours = int(event.pattern_match.group(2) or 24)
+            tasks = storage.get_site_report(name, hours)
+
+            if not tasks:
+                await event.respond(
+                    f"📭 За последние **{hours}ч** с сайта «{name}» заказов не найдено.\n\n"
+                    f"Убедись что название совпадает с `/sites`",
+                    parse_mode="md",
+                )
+                return
+
+            passed  = [t for t in tasks if t["passed_filter"]]
+            skipped = [t for t in tasks if not t["passed_filter"]]
+
+            header = (
+                f"📊 **Отчёт: {name}** (за {hours}ч)\n\n"
+                f"🔍 Всего найдено: **{len(tasks)}**\n"
+                f"✅ Прошло фильтры: **{len(passed)}**\n"
+                f"⏭ Отсеяно фильтрами: **{len(skipped)}**\n"
+            )
+            await event.respond(header, parse_mode="md")
+
+            # Прошедшие фильтры — с превью
+            if passed:
+                chunk = "✅ **Отправлены в Telegram:**\n\n"
+                for t in passed[:30]:
+                    seen = t["seen_at"][11:16]  # HH:MM
+                    kw   = t["matched_keywords"] or ""
+                    prev = (t["preview"] or "")[:120].replace("\n", " ")
+                    chunk += f"🕐 {seen}  {t['task_url']}\n"
+                    if kw:
+                        chunk += f"   🏷 {kw}\n"
+                    if prev:
+                        chunk += f"   {prev}\n"
+                    chunk += "\n"
+                    if len(chunk) > 3500:
+                        await event.respond(chunk, parse_mode="md", link_preview=False)
+                        chunk = ""
+                if chunk.strip():
+                    await event.respond(chunk, parse_mode="md", link_preview=False)
+
+            # Отсеянные — только ссылки
+            if skipped:
+                chunk = "⏭ **Отсеяны фильтрами (нет ключевых слов / контактов):**\n\n"
+                for t in skipped[:50]:
+                    seen  = t["seen_at"][11:16]
+                    chunk += f"🕐 {seen}  {t['task_url']}\n"
+                    if len(chunk) > 3500:
+                        await event.respond(chunk, parse_mode="md", link_preview=False)
+                        chunk = "⏭ _(продолжение)_\n\n"
+                if chunk.strip():
+                    await event.respond(chunk, parse_mode="md", link_preview=False)
 
         # ── /test ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/test$"))

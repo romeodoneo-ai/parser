@@ -261,6 +261,14 @@ def remove_website(url: str) -> bool:
         cursor = conn.execute("UPDATE websites SET active=0 WHERE url=?", (url.strip(),))
         return cursor.rowcount > 0
 
+def set_site_interval(name: str, minutes: int) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "UPDATE websites SET interval_minutes=? WHERE LOWER(name)=LOWER(?) AND active=1",
+            (minutes, name.strip()),
+        )
+        return cursor.rowcount > 0
+
 def set_site_raw_mode(name: str, enabled: bool) -> bool:
     with get_conn() as conn:
         cursor = conn.execute(
@@ -324,6 +332,47 @@ def get_stats() -> dict:
             "today_matches": today_matches,
         }
 
+
+def get_site_report(site_name: str, hours: float = 24):
+    """
+    Возвращает все заказы с конкретного сайта за последние N часов.
+    Каждый элемент: {task_url, seen_at, passed_filter, preview, matched_keywords}
+    passed_filter=True — заказ прошёл фильтры и был отправлен в Telegram.
+    """
+    from datetime import timedelta
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
+    with get_conn() as conn:
+        # Все просмотренные задачи с этого сайта за период
+        seen_rows = conn.execute(
+            "SELECT task_url, seen_at FROM seen_web_tasks "
+            "WHERE LOWER(site_name)=LOWER(?) AND seen_at >= ? ORDER BY seen_at DESC",
+            (site_name.strip(), since),
+        ).fetchall()
+
+        # URL-ы тех, что прошли фильтры (они сохранены в matches.channel = task_url)
+        if seen_rows:
+            urls = [r["task_url"] for r in seen_rows]
+            placeholders = ",".join("?" * len(urls))
+            matched_rows = conn.execute(
+                f"SELECT channel, preview, matched_keywords FROM matches WHERE channel IN ({placeholders})",
+                urls,
+            ).fetchall()
+            matched_map = {r["channel"]: dict(r) for r in matched_rows}
+        else:
+            matched_map = {}
+
+    result = []
+    for row in seen_rows:
+        url = row["task_url"]
+        m = matched_map.get(url)
+        result.append({
+            "task_url":        url,
+            "seen_at":         row["seen_at"],
+            "passed_filter":   url in matched_map,
+            "preview":         m["preview"] if m else "",
+            "matched_keywords": m["matched_keywords"] if m else "",
+        })
+    return result
 
 def get_matches_since(hours: float):
     from datetime import timedelta
