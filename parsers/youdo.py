@@ -23,6 +23,23 @@ except ImportError:
     PLAYWRIGHT_OK = False
 
 
+# CategoryFlag значения для категории "Разработка ПО" и всех подкатегорий.
+# Если список пустой — берём все категории (фильтр отключён).
+IT_CATEGORY_FLAGS = {
+    "it",
+    "programming",
+    "web",
+    "mobile",
+    "1c",
+    "itother",
+    "it_other",
+    "software",
+    "development",
+    "webdev",
+    "mobiledev",
+}
+
+
 class YoudoParser(BaseParser):
     name = "YouDo"
     base_url = "https://youdo.com"
@@ -161,8 +178,20 @@ class YoudoParser(BaseParser):
                                 candidates = sub
                                 break
 
-        for item in candidates[:50]:
+        # Логируем все уникальные CategoryFlag — чтобы знать точные значения
+        all_flags = {
+            str(item.get("CategoryFlag") or item.get("categoryFlag") or "")
+            for item in candidates if isinstance(item, dict)
+        }
+        if all_flags:
+            logger.info(f"[YouDo] CategoryFlag в ответе: {sorted(all_flags)}")
+
+        for item in candidates[:100]:
             if not isinstance(item, dict):
+                continue
+            # Фильтр по категории "Разработка ПО"
+            flag = str(item.get("CategoryFlag") or item.get("categoryFlag") or "").lower()
+            if IT_CATEGORY_FLAGS and flag and flag not in IT_CATEGORY_FLAGS:
                 continue
             task = self._item_to_task(item)
             if task:
@@ -286,11 +315,12 @@ class YoudoParser(BaseParser):
         """
         tasks = []
 
-        # Пробуем прямой API YouDo (эндпоинт подтверждён из логов)
+        # Прямой API YouDo (эндпоинт подтверждён из логов)
+        # Пробуем сначала с фильтром по категории IT, затем без фильтра (фильтруем сами)
         api_urls = [
-            "https://youdo.com/api/tasks/tasks/?count=30&page=0&status=opened",
-            "https://youdo.com/api/tasks/tasks/?count=30",
-            "https://youdo.com/api/tasks/?count=30&page=0&status=opened",
+            "https://youdo.com/api/tasks/tasks/?count=50&categories[]=it&status=opened",
+            "https://youdo.com/api/tasks/tasks/?count=50&page=0&status=opened",
+            "https://youdo.com/api/tasks/tasks/?count=50",
         ]
         for api_url in api_urls:
             try:
