@@ -183,17 +183,25 @@ class YoudoParser(BaseParser):
         )
         description = (description or "").strip()[:500]
 
-        price_amount = item.get("PriceAmount") or item.get("priceAmount")
-        if price_amount is not None and price_amount != 0:
-            budget = f"{price_amount} ₽"
-        else:
-            price = item.get("price") or item.get("budget") or item.get("reward") or {}
-            if isinstance(price, dict):
-                val = price.get("amount") or price.get("value") or ""
-                cur = price.get("currency", "₽")
-                budget = f"{val} {cur}".strip() if val else "Договорная"
-            else:
-                budget = str(price) if price else "Договорная"
+        # Ищем цену во всех известных полях YouDo API
+        budget = ""
+        for price_key in ("PriceAmount", "priceAmount", "Price", "price",
+                          "MinPrice", "minPrice", "MaxPrice", "maxPrice",
+                          "budget", "reward", "amount"):
+            val = item.get(price_key)
+            if val is None:
+                continue
+            if isinstance(val, (int, float)) and val > 0:
+                budget = f"{int(val)} ₽"
+                break
+            if isinstance(val, dict):
+                amt = val.get("amount") or val.get("value") or 0
+                if amt and int(amt) > 0:
+                    cur = val.get("currency", "₽")
+                    budget = f"{int(amt)} {cur}"
+                    break
+        if not budget:
+            budget = "Договорная"
 
         date = str(
             item.get("CreatedDate") or item.get("createdAt") or

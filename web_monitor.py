@@ -6,6 +6,7 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 
 import aiohttp
@@ -26,6 +27,32 @@ HEADERS = {
 }
 
 
+def _extract_nextjs_description(html: str) -> str:
+    """Ищет описание задания в __NEXT_DATA__ (Next.js SSR)."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        tag = soup.find("script", {"id": "__NEXT_DATA__"})
+        if not tag or not tag.string:
+            return ""
+        nd = json.loads(tag.string)
+        props = nd.get("props", {}).get("pageProps", {})
+        # Перебираем вероятные пути до объекта задания
+        for path in (["task"], ["taskInfo"], ["initialData", "task"],
+                     ["initialData"], ["data", "task"], ["data"]):
+            obj = props
+            for key in path:
+                if isinstance(obj, dict):
+                    obj = obj.get(key) or {}
+            if isinstance(obj, dict):
+                desc = (obj.get("description") or obj.get("Description")
+                        or obj.get("text") or obj.get("body") or "")
+                if desc and len(desc) > 10:
+                    return str(desc).strip()[:600]
+    except Exception:
+        pass
+    return ""
+
+
 async def fetch_full_text(session, url: str) -> str:
     """Загружает страницу заказа и возвращает чистый текст (без HTML-тегов)."""
     try:
@@ -33,6 +60,12 @@ async def fetch_full_text(session, url: str) -> str:
             if resp.status != 200:
                 return ""
             html = await resp.text()
+
+        # Next.js SPA: описание в __NEXT_DATA__, не в видимом HTML
+        nextjs_desc = _extract_nextjs_description(html)
+        if nextjs_desc:
+            return nextjs_desc
+
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "nav", "footer", "header", "meta", "link"]):
             tag.decompose()
