@@ -99,6 +99,32 @@ class YoudoParser(BaseParser):
                     await page.evaluate("window.scrollBy(0, 800)")
                     await page.wait_for_timeout(700)
 
+                # ── Зондируем API деталей задания (разовое логирование) ───────
+                # Берём первый пойманный task_id и пробуем несколько эндпоинтов
+                if captured_tasks:
+                    sample_id = captured_tasks[0]["id"]
+                    detail_endpoints = [
+                        f"/api/tasks/taskinfo/?taskid={sample_id}",
+                        f"/api/tasks/tasks/{sample_id}/",
+                        f"/api/tasks/task/{sample_id}/",
+                    ]
+                    for ep in detail_endpoints:
+                        try:
+                            result = await page.evaluate(f"""
+                                async () => {{
+                                    const r = await fetch('{ep}', {{credentials: 'include'}});
+                                    if (!r.ok) return null;
+                                    return await r.json();
+                                }}
+                            """)
+                            if result:
+                                logger.info(f"[YouDo] detail API {ep} → {str(result)[:500]}")
+                                break
+                            else:
+                                logger.info(f"[YouDo] detail API {ep} → пусто/ошибка")
+                        except Exception as ex:
+                            logger.info(f"[YouDo] detail API {ep} → {ex}")
+
                 html = await page.content()
                 await browser.close()
 
