@@ -109,41 +109,55 @@ class YoudoParser(BaseParser):
                 except Exception as e:
                     logger.warning(f"[YouDo] goto ошибка: {e}")
 
-                # Ждём появления реальных заданий
+                # Ждём появления реальных заданий (формат /tNNNNNN)
                 try:
                     await page.wait_for_function(
-                        "() => document.querySelectorAll('a[href*=\"/tasks/t-\"]').length > 0",
+                        "() => [...document.querySelectorAll('a[href]')]"
+                        ".some(a => /^\\/t\\d+/.test(a.getAttribute('href')))",
                         timeout=20000,
                     )
                     logger.info("[YouDo] Задания появились на странице.")
                 except Exception:
                     logger.warning("[YouDo] Задания не появились за 20 сек.")
-                    await page.wait_for_timeout(3000)
+                    await page.wait_for_timeout(2000)
 
                 # Прокручиваем для lazy-load
-                for _ in range(4):
+                for _ in range(3):
                     await page.evaluate("window.scrollBy(0, 800)")
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(800)
 
-                html = await page.content()
+                # ── Принудительный API-запрос с фильтром IT ──────────────────
+                # Страница tasks-all-opened-all загружает ВСЕ категории.
+                # Делаем свой fetch прямо из браузера — слушатель поймает ответ.
+                it_api_urls = [
+                    "/api/tasks/tasks/?count=50&categories[]=it&status=opened",
+                    "/api/tasks/tasks/?count=50&category=it&status=opened",
+                ]
+                for api_path in it_api_urls:
+                    try:
+                        await page.evaluate(f"""
+                            async () => {{
+                                await fetch('{api_path}', {{
+                                    credentials: 'include',
+                                    headers: {{'Accept': 'application/json'}}
+                                }});
+                            }}
+                        """)
+                        await page.wait_for_timeout(2000)
+                        if captured_tasks:
+                            break
+                    except Exception as ex:
+                        logger.debug(f"[YouDo] inject fetch {api_path}: {ex}")
 
-                # ── Дамп всех уникальных href (коротко) ──────────────────────
-                soup_debug = BeautifulSoup(html, "html.parser")
-                hrefs = sorted({
-                    a["href"] for a in soup_debug.find_all("a", href=True)
-                    if a["href"].startswith("/") and len(a["href"]) > 5
-                })[:40]
-                logger.info(f"[YouDo] Все ссылки ({len(hrefs)}): {hrefs}")
+                if captured_tasks:
+                    logger.info(f"[YouDo] IT API через Playwright: {len(captured_tasks)} задач")
+                else:
+                    logger.warning("[YouDo] IT API в браузере не дал задач — будет HTTP-fallback.")
 
                 await browser.close()
 
         except Exception as e:
             logger.error(f"[YouDo] Playwright ошибка: {e}")
-            return captured_tasks
-
-        # Если API не дал результатов — парсим HTML
-        if not captured_tasks:
-            captured_tasks = self._parse_html(html)
 
         return captured_tasks
 
