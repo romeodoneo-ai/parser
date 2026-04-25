@@ -58,25 +58,35 @@ class YoudoParser(BaseParser):
                 )
                 page = await context.new_page()
 
-                # Флаг: ловим ответы только ПОСЛЕ клика по IT-фильтру
+                # Ловим ВСЕ ответы API, логируем категории чтобы найти IT-фильтр
                 capture_active = [False]
 
                 async def on_response(response):
-                    if not capture_active[0]:
-                        return
                     if response.status != 200:
                         return
-                    if "youdo.com/api/tasks" not in response.url:
+                    if "youdo.com/api/" not in response.url:
                         return
                     ct = response.headers.get("content-type", "")
                     if "json" not in ct:
                         return
                     try:
                         data = await response.json()
-                        found = self._extract_from_json(data)
-                        if found:
-                            logger.info(f"[YouDo] IT API {response.url} → {len(found)} задач")
-                            captured_tasks.extend(found)
+                        # Логируем любой API-ответ с задачами, до и после клика
+                        candidates = self._raw_candidates(data)
+                        if candidates:
+                            first = candidates[0] if candidates else {}
+                            cat_fields = {k: v for k, v in first.items()
+                                          if any(s in k.lower() for s in
+                                                 ("cat", "rubric", "tag", "type", "kind", "section"))}
+                            logger.info(
+                                f"[YouDo] API {'[POST-CLICK]' if capture_active[0] else '[PRE-CLICK]'} "
+                                f"{response.url} → {len(candidates)} задач | "
+                                f"пример категорий: {cat_fields}"
+                            )
+                            if capture_active[0]:
+                                found = self._extract_from_json(data)
+                                if found:
+                                    captured_tasks.extend(found)
                     except Exception as e:
                         logger.debug(f"[YouDo] JSON ошибка {response.url}: {e}")
 
@@ -135,6 +145,22 @@ class YoudoParser(BaseParser):
         if html:
             return self._parse_by_links(html)
 
+        return []
+
+    def _raw_candidates(self, data) -> list:
+        """Возвращает сырой список задач из JSON без фильтрации."""
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            ro = data.get("ResultObject") or data.get("resultObject")
+            if isinstance(ro, dict):
+                items = ro.get("Items") or ro.get("items") or []
+                if isinstance(items, list):
+                    return items
+            for key in ("tasks", "items", "result", "data", "assignments", "orders"):
+                val = data.get(key)
+                if isinstance(val, list) and val:
+                    return val
         return []
 
     def _extract_from_json(self, data) -> list:
