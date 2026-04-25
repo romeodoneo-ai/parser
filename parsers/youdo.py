@@ -250,14 +250,6 @@ class YoudoParser(BaseParser):
                 if val and isinstance(val, (int, float)) and val > 0:
                     enriched["budget"] = f"{int(val)} ₽"
                     break
-            else:
-                # Логируем числовые поля чтобы найти где цена для платных задач
-                num_fields = {k: v for k, v in td.items()
-                              if isinstance(v, (int, float)) and v > 0
-                              and k not in ("Id", "CategoryId", "SubCategoryId",
-                                           "CityId", "TaskId", "UserId")}
-                if num_fields:
-                    logger.info(f"[YouDo] TaskData числа (PaymentType={td.get('PaymentType')}): {num_fields}")
 
         return enriched
 
