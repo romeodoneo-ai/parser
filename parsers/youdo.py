@@ -58,8 +58,12 @@ class YoudoParser(BaseParser):
                 )
                 page = await context.new_page()
 
-                # Перехватываем JSON-ответы YouDo API
+                # Флаг: ловим ответы только ПОСЛЕ клика по IT-фильтру
+                capture_active = [False]
+
                 async def on_response(response):
+                    if not capture_active[0]:
+                        return
                     if response.status != 200:
                         return
                     if "youdo.com/api/tasks" not in response.url:
@@ -71,7 +75,7 @@ class YoudoParser(BaseParser):
                         data = await response.json()
                         found = self._extract_from_json(data)
                         if found:
-                            logger.info(f"[YouDo] API {response.url} → {len(found)} задач")
+                            logger.info(f"[YouDo] IT API {response.url} → {len(found)} задач")
                             captured_tasks.extend(found)
                     except Exception as e:
                         logger.debug(f"[YouDo] JSON ошибка {response.url}: {e}")
@@ -94,7 +98,8 @@ class YoudoParser(BaseParser):
                     logger.warning("[YouDo] Задания не появились за 20 сек.")
                     await page.wait_for_timeout(2000)
 
-                # Кликаем на фильтр "Разработка ПО" — сайт сам сделает API-запрос
+                # Включаем захват и кликаем на "Разработка ПО"
+                capture_active[0] = True
                 try:
                     await page.evaluate("""
                         () => {
@@ -106,9 +111,8 @@ class YoudoParser(BaseParser):
                             if (el) el.click();
                         }
                     """)
-                    logger.info("[YouDo] Клик по 'Разработка ПО'")
-                    # Ждём новый API-ответ с IT-задачами
-                    await page.wait_for_timeout(4000)
+                    logger.info("[YouDo] Клик по 'Разработка ПО' — ждём IT-ответ")
+                    await page.wait_for_timeout(5000)
                 except Exception as e:
                     logger.warning(f"[YouDo] Не удалось кликнуть фильтр: {e}")
 
