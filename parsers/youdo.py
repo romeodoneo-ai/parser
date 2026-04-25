@@ -94,6 +94,24 @@ class YoudoParser(BaseParser):
                     logger.warning("[YouDo] Задания не появились за 20 сек.")
                     await page.wait_for_timeout(2000)
 
+                # Кликаем на фильтр "Разработка ПО" — сайт сам сделает API-запрос
+                try:
+                    await page.evaluate("""
+                        () => {
+                            const all = [...document.querySelectorAll('*')];
+                            const el = all.find(
+                                e => e.childNodes.length === 1
+                                  && e.textContent.trim() === 'Разработка ПО'
+                            );
+                            if (el) el.click();
+                        }
+                    """)
+                    logger.info("[YouDo] Клик по 'Разработка ПО'")
+                    # Ждём новый API-ответ с IT-задачами
+                    await page.wait_for_timeout(4000)
+                except Exception as e:
+                    logger.warning(f"[YouDo] Не удалось кликнуть фильтр: {e}")
+
                 # Прокрутка для подгрузки lazy-load
                 for _ in range(3):
                     await page.evaluate("window.scrollBy(0, 800)")
@@ -184,6 +202,12 @@ class YoudoParser(BaseParser):
         description = (description or "").strip()[:500]
 
         budget = ""
+        for price_key in ("MaxPrice", "PriceAmount", "priceAmount", "MinPrice"):
+            val = item.get(price_key)
+            if val and isinstance(val, (int, float)) and val > 0:
+                prefix = "до " if price_key == "MaxPrice" else ""
+                budget = f"{prefix}{int(val)} ₽"
+                break
 
         date = str(
             item.get("CreatedDate") or item.get("createdAt") or
