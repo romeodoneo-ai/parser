@@ -76,8 +76,9 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
     url  = site["url"]
     name = site["name"]
 
-    need_contacts = storage.contacts_filter_web_enabled()
-    need_keywords = storage.web_keywords_enabled()
+    raw_mode     = bool(site.get("raw_mode", False))
+    need_contacts = storage.contacts_filter_web_enabled() and not raw_mode
+    need_keywords = storage.web_keywords_enabled() and not raw_mode
 
     try:
         tasks = await parser.get_tasks(session, url)

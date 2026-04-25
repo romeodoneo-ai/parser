@@ -39,6 +39,8 @@ HELP_TEXT = """
 /add_site Название https://... 20 — добавить (20 = минуты)
 /remove_site Название — убрать по названию
 /remove_site https://... — убрать по ссылке
+/site_raw_on Название — все заказы без фильтров
+/site_raw_off Название — вернуть фильтры
 
 **Фильтры**
 /contacts — все настройки фильтрации
@@ -404,11 +406,16 @@ class ManagerBot:
                     parse_mode="md",
                 )
                 return
-            lines = [f"• **{s['name']}** — каждые {s['interval_minutes']} мин.\n  {s['url']}" for s in sites]
+            lines = []
+            for s in sites:
+                raw_tag = "  🔓 **все заказы**" if s.get("raw_mode") else ""
+                lines.append(f"• **{s['name']}** — каждые {s['interval_minutes']} мин.{raw_tag}\n  {s['url']}")
             await event.respond(
                 f"🌐 **Отслеживаемые сайты** ({len(sites)}):\n\n" + "\n\n".join(lines) +
                 "\n\nДобавить: `/add_site Название https://... 20`"
-                "\nУбрать: `/remove_site Название`",
+                "\nУбрать: `/remove_site Название`"
+                "\nВсе заказы без фильтров: `/site_raw_on Название`"
+                "\nВернуть фильтры: `/site_raw_off Название`",
                 parse_mode="md",
                 link_preview=False,
             )
@@ -490,6 +497,30 @@ class ManagerBot:
                 "На следующей проверке все заказы будут проанализированы заново.",
                 parse_mode="md",
             )
+
+        # ── /site_raw_on /site_raw_off ────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/site_raw_on (.+)$"))
+        async def cmd_site_raw_on(event):
+            name = event.pattern_match.group(1).strip()
+            if storage.set_site_raw_mode(name, True):
+                await event.respond(
+                    f"🔓 Сайт **{name}**: режим **все заказы** включён.\n"
+                    f"Все новые заказы будут отправляться без фильтров по ключевым словам и контактам.",
+                    parse_mode="md",
+                )
+            else:
+                await event.respond(f"❌ Сайт «{name}» не найден. Проверь название через /sites")
+
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/site_raw_off (.+)$"))
+        async def cmd_site_raw_off(event):
+            name = event.pattern_match.group(1).strip()
+            if storage.set_site_raw_mode(name, False):
+                await event.respond(
+                    f"🔒 Сайт **{name}**: фильтры **возвращены**.",
+                    parse_mode="md",
+                )
+            else:
+                await event.respond(f"❌ Сайт «{name}» не найден. Проверь название через /sites")
 
         # ── /test ────────────────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/test$"))

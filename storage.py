@@ -85,6 +85,11 @@ def init_db():
                 matched_at       TEXT NOT NULL
             );
         """)
+        # Миграция: добавляем raw_mode если колонки ещё нет
+        try:
+            conn.execute("ALTER TABLE websites ADD COLUMN raw_mode INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
 
 # ─────────────── Просмотренные сообщения ───────────────
@@ -235,7 +240,9 @@ def remove_excluded_keyword(keyword: str) -> bool:
 
 def get_websites():
     with get_conn() as conn:
-        rows = conn.execute("SELECT url, name, interval_minutes FROM websites WHERE active=1").fetchall()
+        rows = conn.execute(
+            "SELECT url, name, interval_minutes, COALESCE(raw_mode, 0) as raw_mode FROM websites WHERE active=1"
+        ).fetchall()
         return [dict(r) for r in rows]
 
 def add_website(url: str, name: str, interval_minutes: int = 20):
@@ -252,6 +259,14 @@ def add_website(url: str, name: str, interval_minutes: int = 20):
 def remove_website(url: str) -> bool:
     with get_conn() as conn:
         cursor = conn.execute("UPDATE websites SET active=0 WHERE url=?", (url.strip(),))
+        return cursor.rowcount > 0
+
+def set_site_raw_mode(name: str, enabled: bool) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "UPDATE websites SET raw_mode=? WHERE LOWER(name)=LOWER(?) AND active=1",
+            (1 if enabled else 0, name.strip()),
+        )
         return cursor.rowcount > 0
 
 def remove_website_by_name(name: str) -> bool:
