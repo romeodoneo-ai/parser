@@ -191,9 +191,9 @@ class YoudoParser(BaseParser):
             if isinstance(price, dict):
                 val = price.get("amount") or price.get("value") or ""
                 cur = price.get("currency", "₽")
-                budget = f"{val} {cur}".strip() if val else ""
+                budget = f"{val} {cur}".strip() if val else "Договорная"
             else:
-                budget = str(price) if price else ""
+                budget = str(price) if price else "Договорная"
 
         date = str(
             item.get("CreatedDate") or item.get("createdAt") or

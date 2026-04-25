@@ -100,6 +100,14 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             storage.mark_web_task_seen(task_url, name)
             new_count += 1
 
+            # Если описание пустое — подгружаем страницу задания
+            if not task.get("description") and task_url:
+                await asyncio.sleep(0.5)
+                detail_text = await fetch_full_text(session, task_url)
+                if detail_text and len(detail_text) > 50:
+                    task = dict(task)
+                    task["description"] = detail_text[:500]
+
             # Текст с листинга (короткий)
             listing_text = (task.get("title", "") + " " + task.get("description", "")).strip()
 
