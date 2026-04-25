@@ -84,6 +84,15 @@ def format_task_notification(task: dict, site_name: str, contacts: str = "") -> 
     if task.get("budget"):
         lines.append(f"💰 {task['budget']}")
 
+    offers = task.get("offers_count", -1)
+    if offers == 0:
+        lines.append("🔥 Откликов: 0 — первый!")
+    elif offers > 0:
+        lines.append(f"👥 Откликов: {offers}")
+
+    if task.get("is_sbr"):
+        lines.append("🔒 Безопасная сделка")
+
     if task.get("date"):
         lines.append(f"📅 {task['date']}")
 
@@ -109,9 +118,9 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
     url  = site["url"]
     name = site["name"]
 
-    raw_mode     = bool(site.get("raw_mode", False))
+    raw_mode      = bool(site.get("raw_mode", False))
     need_contacts = storage.contacts_filter_web_enabled() and not raw_mode
-    need_keywords = storage.web_keywords_enabled() and not raw_mode
+    need_keywords = False  # для сайтов с парсером категория уже отфильтрована сервером
 
     try:
         tasks = await parser.get_tasks(session, url)
