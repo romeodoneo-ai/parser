@@ -120,6 +120,21 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             logger.info(f"[{name}] Заказов не найдено (парсер вернул пустой список).")
             return
 
+        # Первый запуск — ни один заказ ещё не помечен как виденный
+        is_first_run = not any(storage.is_web_task_seen(t.get("url", "")) for t in tasks if t.get("url"))
+        if is_first_run:
+            for task in tasks:
+                task_url = task.get("url", "")
+                if task_url:
+                    storage.mark_web_task_seen(task_url, name)
+            await bot_client.send_message(
+                user_id,
+                f"📋 **{name}** — первый запуск\n\nЗагружено **{len(tasks)}** заказов за последнее время.\nТеперь слежу за новыми в реальном времени.",
+                parse_mode="md",
+            )
+            logger.info(f"[{name}] Первый запуск — загружено {len(tasks)} заказов, уведомления не отправлялись.")
+            return
+
         new_count = 0
         for task in tasks:
             task_url = task.get("url", "")
