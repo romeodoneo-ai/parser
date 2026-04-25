@@ -99,32 +99,6 @@ class YoudoParser(BaseParser):
                     await page.evaluate("window.scrollBy(0, 800)")
                     await page.wait_for_timeout(700)
 
-                # ── Зондируем API деталей задания (разовое логирование) ───────
-                # Берём первый пойманный task_id и пробуем несколько эндпоинтов
-                if captured_tasks:
-                    sample_id = captured_tasks[0]["id"]
-                    detail_endpoints = [
-                        f"/api/tasks/taskinfo/?taskid={sample_id}",
-                        f"/api/tasks/tasks/{sample_id}/",
-                        f"/api/tasks/task/{sample_id}/",
-                    ]
-                    for ep in detail_endpoints:
-                        try:
-                            result = await page.evaluate(f"""
-                                async () => {{
-                                    const r = await fetch('{ep}', {{credentials: 'include'}});
-                                    if (!r.ok) return null;
-                                    return await r.json();
-                                }}
-                            """)
-                            if result:
-                                logger.info(f"[YouDo] detail API {ep} → {str(result)[:500]}")
-                                break
-                            else:
-                                logger.info(f"[YouDo] detail API {ep} → пусто/ошибка")
-                        except Exception as ex:
-                            logger.info(f"[YouDo] detail API {ep} → {ex}")
-
                 html = await page.content()
                 await browser.close()
 
@@ -242,6 +216,42 @@ class YoudoParser(BaseParser):
             "date":        date,
             "url":         task_url,
         }
+
+    async def enrich_task(self, session, task: dict) -> dict:
+        """Подгружает описание и цену из API детали задания."""
+        task_id = task.get("id")
+        if not task_id:
+            return task
+        try:
+            detail_url = f"https://youdo.com/api/tasks/task/{task_id}/"
+            async with session.get(
+                detail_url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    return task
+                data = await resp.json(content_type=None)
+        except Exception:
+            return task
+
+        td = (data.get("ResultObject") or {}).get("TaskData") or {}
+        if not td:
+            return task
+
+        enriched = dict(task)
+
+        desc = (td.get("Description") or td.get("description") or "").strip()
+        if desc:
+            enriched["description"] = desc[:500]
+
+        # Цена — ищем в полях TaskData
+        if enriched.get("budget") == "Договорная" or not enriched.get("budget"):
+            for key in ("PriceAmount", "MinPrice", "MaxPrice", "Price", "price"):
+                val = td.get(key)
+                if val and isinstance(val, (int, float)) and val > 0:
+                    enriched["budget"] = f"{int(val)} ₽"
+                    break
+
+        return enriched
 
     async def _fetch_via_http(self, session, url: str) -> list:
         api_urls = [
