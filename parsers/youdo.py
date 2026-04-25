@@ -144,7 +144,7 @@ class YoudoParser(BaseParser):
 
         return tasks
 
-    def _item_to_task(self, item: dict) -> dict | None:
+    def _item_to_task(self, item: dict):
         """Конвертирует один JSON-объект задания в стандартный формат."""
         # ID
         task_id = str(item.get("id") or item.get("taskId") or item.get("guid") or "")
