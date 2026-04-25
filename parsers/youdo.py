@@ -183,25 +183,7 @@ class YoudoParser(BaseParser):
         )
         description = (description or "").strip()[:500]
 
-        # Ищем цену во всех известных полях YouDo API
         budget = ""
-        for price_key in ("PriceAmount", "priceAmount", "Price", "price",
-                          "MinPrice", "minPrice", "MaxPrice", "maxPrice",
-                          "budget", "reward", "amount"):
-            val = item.get(price_key)
-            if val is None:
-                continue
-            if isinstance(val, (int, float)) and val > 0:
-                budget = f"{int(val)} ₽"
-                break
-            if isinstance(val, dict):
-                amt = val.get("amount") or val.get("value") or 0
-                if amt and int(amt) > 0:
-                    cur = val.get("currency", "₽")
-                    budget = f"{int(amt)} {cur}"
-                    break
-        if not budget:
-            budget = "Договорная"
 
         date = str(
             item.get("CreatedDate") or item.get("createdAt") or
@@ -242,14 +224,6 @@ class YoudoParser(BaseParser):
         desc = (td.get("Description") or td.get("description") or "").strip()
         if desc:
             enriched["description"] = desc[:500]
-
-        # Цена — ищем в полях TaskData
-        if enriched.get("budget") == "Договорная" or not enriched.get("budget"):
-            for key in ("PriceAmount", "MinPrice", "MaxPrice", "Price", "price"):
-                val = td.get(key)
-                if val and isinstance(val, (int, float)) and val > 0:
-                    enriched["budget"] = f"{int(val)} ₽"
-                    break
 
         return enriched
 
