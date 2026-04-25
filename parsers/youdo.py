@@ -78,11 +78,11 @@ class YoudoParser(BaseParser):
                             logger.info(f"[YouDo] API JSON {resp_url} → {len(found)} задач")
                             captured_tasks.extend(found)
                         else:
-                            # Логируем все JSON-ответы для отладки (первые 120 символов)
-                            preview = str(data)[:120]
-                            logger.debug(f"[YouDo] JSON (нет задач) {resp_url}: {preview}")
+                            # Временно INFO для отладки — видим что реально приходит
+                            preview = str(data)[:200]
+                            logger.info(f"[YouDo] JSON (нет задач) {resp_url} :: {preview}")
                     except Exception as e:
-                        logger.debug(f"[YouDo] Не удалось разобрать JSON {resp_url}: {e}")
+                        logger.info(f"[YouDo] JSON ошибка {resp_url}: {e}")
 
                 page.on("response", on_response)
 
@@ -92,32 +92,31 @@ class YoudoParser(BaseParser):
                 except Exception as e:
                     logger.warning(f"[YouDo] goto ошибка: {e}")
 
-                # Ждём появления реальных заданий (не категорий)
+                # Ждём появления реальных заданий
                 try:
-                    # YouDo показывает список заданий в ul/li или div со ссылками /tasks/t-
                     await page.wait_for_function(
                         "() => document.querySelectorAll('a[href*=\"/tasks/t-\"]').length > 0",
-                        timeout=15000,
+                        timeout=20000,
                     )
                     logger.info("[YouDo] Задания появились на странице.")
                 except Exception:
-                    logger.warning("[YouDo] Задания не появились за 15 сек — парсим что есть.")
-                    await page.wait_for_timeout(5000)
+                    logger.warning("[YouDo] Задания не появились за 20 сек.")
+                    await page.wait_for_timeout(3000)
 
                 # Прокручиваем для lazy-load
                 for _ in range(4):
                     await page.evaluate("window.scrollBy(0, 800)")
-                    await page.wait_for_timeout(1200)
+                    await page.wait_for_timeout(1000)
 
                 html = await page.content()
 
-                # ── Дамп всех уникальных href для отладки ────────────────────
+                # ── Дамп всех уникальных href (коротко) ──────────────────────
                 soup_debug = BeautifulSoup(html, "html.parser")
-                hrefs = list({
+                hrefs = sorted({
                     a["href"] for a in soup_debug.find_all("a", href=True)
-                    if a["href"].startswith("/") and len(a["href"]) > 3
-                })[:30]
-                logger.info(f"[YouDo] Ссылки на странице: {hrefs}")
+                    if a["href"].startswith("/") and len(a["href"]) > 5
+                })[:40]
+                logger.info(f"[YouDo] Все ссылки ({len(hrefs)}): {hrefs}")
 
                 await browser.close()
 
