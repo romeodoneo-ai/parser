@@ -63,43 +63,62 @@ class YoudoParser(BaseParser):
                 )
                 page = await context.new_page()
 
-                # ── Перехватываем API-ответы ──────────────────────────────────
+                # ── Перехватываем ВСЕ JSON API-ответы ────────────────────────
                 async def on_response(response):
-                    resp_url = response.url
-                    # YouDo использует /api/tasks/ и /graphql
-                    if not any(k in resp_url for k in ("/api/task", "/tasks", "graphql")):
-                        return
                     if response.status != 200:
                         return
                     ct = response.headers.get("content-type", "")
                     if "json" not in ct:
                         return
+                    resp_url = response.url
                     try:
                         data = await response.json()
                         found = self._extract_from_json(data)
                         if found:
-                            logger.info(f"[YouDo] API-ответ с {resp_url} → {len(found)} задач")
+                            logger.info(f"[YouDo] API JSON {resp_url} → {len(found)} задач")
                             captured_tasks.extend(found)
+                        else:
+                            # Логируем все JSON-ответы для отладки (первые 120 символов)
+                            preview = str(data)[:120]
+                            logger.debug(f"[YouDo] JSON (нет задач) {resp_url}: {preview}")
                     except Exception as e:
-                        logger.debug(f"[YouDo] Не удалось разобрать JSON с {resp_url}: {e}")
+                        logger.debug(f"[YouDo] Не удалось разобрать JSON {resp_url}: {e}")
 
                 page.on("response", on_response)
 
-                # ── Загружаем страницу ─────────────────────────────────────────
+                # ── Загружаем страницу ────────────────────────────────────────
                 try:
-                    await page.goto(url, wait_until="networkidle", timeout=45000)
-                except Exception:
-                    # networkidle может таймаутить на динамичных сайтах — продолжаем
-                    pass
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                except Exception as e:
+                    logger.warning(f"[YouDo] goto ошибка: {e}")
 
-                await page.wait_for_timeout(5000)
+                # Ждём появления реальных заданий (не категорий)
+                try:
+                    # YouDo показывает список заданий в ul/li или div со ссылками /tasks/t-
+                    await page.wait_for_function(
+                        "() => document.querySelectorAll('a[href*=\"/tasks/t-\"]').length > 0",
+                        timeout=15000,
+                    )
+                    logger.info("[YouDo] Задания появились на странице.")
+                except Exception:
+                    logger.warning("[YouDo] Задания не появились за 15 сек — парсим что есть.")
+                    await page.wait_for_timeout(5000)
 
                 # Прокручиваем для lazy-load
-                for _ in range(3):
-                    await page.evaluate("window.scrollBy(0, 600)")
-                    await page.wait_for_timeout(1500)
+                for _ in range(4):
+                    await page.evaluate("window.scrollBy(0, 800)")
+                    await page.wait_for_timeout(1200)
 
                 html = await page.content()
+
+                # ── Дамп всех уникальных href для отладки ────────────────────
+                soup_debug = BeautifulSoup(html, "html.parser")
+                hrefs = list({
+                    a["href"] for a in soup_debug.find_all("a", href=True)
+                    if a["href"].startswith("/") and len(a["href"]) > 3
+                })[:30]
+                logger.info(f"[YouDo] Ссылки на странице: {hrefs}")
+
                 await browser.close()
 
         except Exception as e:
@@ -198,52 +217,43 @@ class YoudoParser(BaseParser):
 
     # ─────────────────────────────────────────────────────────────────────────
     def _parse_html(self, html: str) -> list:
-        """Парсит HTML (после JS-рендера) с расширенным набором селекторов."""
+        """Парсит HTML (после JS-рендера)."""
         soup = BeautifulSoup(html, "html.parser")
-        tasks = []
 
-        # YouDo генерирует минифицированные классы — ищем по data-атрибутам и структуре
+        # Сначала ищем ссылки на задания — самый надёжный способ
+        tasks = self._parse_by_links(soup)
+        if tasks:
+            return tasks
+
+        # Резервно — ищем карточки по data-атрибутам
         cards = (
             soup.select("[data-testid*='task']") or
             soup.select("[data-task-id]") or
-            soup.select("[data-id]") or
-            soup.select("li[class*='Task']") or
-            soup.select("li[class*='task']") or
-            soup.select("div[class*='Task']") or
-            soup.select("div[class*='task']") or
-            soup.select("article") or
             []
         )
-
         if cards:
-            logger.info(f"[YouDo] HTML: найдено {len(cards)} карточек через CSS-селекторы.")
+            logger.info(f"[YouDo] HTML: {len(cards)} карточек по data-атрибутам.")
             for card in cards:
                 try:
-                    link = (
-                        card.select_one("a[href*='/tasks/']") or
-                        card.select_one("a[href*='/task/']")
-                    )
+                    link = card.select_one("a[href]")
                     if not link:
                         continue
                     href  = link.get("href", "")
                     title = link.get_text(strip=True) or card.get_text(" ", strip=True)[:100]
                     if len(title) < 5:
                         continue
-                    task_id = href.rstrip("/").split("/")[-1]
                     tasks.append({
-                        "id": task_id, "title": title, "description": "",
+                        "id": href.rstrip("/").split("/")[-1],
+                        "title": title, "description": "",
                         "budget": "", "date": "",
                         "url": self.full_url(href),
                     })
                 except Exception:
                     pass
-        else:
-            tasks = self._parse_by_links(soup)
 
-        # Логируем для отладки
         if not tasks:
             text_sample = soup.get_text(" ", strip=True)[:300]
-            logger.warning(f"[YouDo] HTML парсинг: 0 задач. Текст страницы: {text_sample!r}")
+            logger.warning(f"[YouDo] HTML: 0 задач. Текст: {text_sample!r}")
 
         return tasks
 
@@ -286,24 +296,38 @@ class YoudoParser(BaseParser):
     def _parse_by_links(self, soup) -> list:
         tasks = []
         seen  = set()
-        for link in soup.select("a[href*='/tasks/'], a[href*='/task/']"):
-            href = link.get("href", "")
-            if not href or href in seen:
-                continue
-            # Исключаем служебные страницы
-            if href in ("/tasks-all-opened-all", "/tasks/") or "?" in href.split("/")[-1]:
-                continue
-            seen.add(href)
-            title = link.get_text(strip=True)
-            if len(title) < 5:
-                continue
-            tasks.append({
-                "id":          href.rstrip("/").split("/")[-1],
-                "title":       title,
-                "description": "",
-                "budget":      "",
-                "date":        "",
-                "url":         self.full_url(href),
-            })
+
+        # YouDo использует /tasks/t-XXXXXXXX/ для отдельных заданий
+        selectors = [
+            "a[href*='/tasks/t-']",   # основной формат YouDo
+            "a[href*='/task/t-']",
+            "a[href*='/tasks/']",
+            "a[href*='/task/']",
+        ]
+        SKIP = {"/tasks-all-opened-all", "/tasks/", "/task/", "/tasks", "/task"}
+
+        for sel in selectors:
+            for link in soup.select(sel):
+                href = link.get("href", "")
+                if not href or href in seen or href in SKIP:
+                    continue
+                # Пропускаем категорийные и фильтровые страницы
+                if href.count("/") < 2:
+                    continue
+                seen.add(href)
+                title = link.get_text(strip=True)
+                if len(title) < 5:
+                    continue
+                tasks.append({
+                    "id":          href.rstrip("/").split("/")[-1],
+                    "title":       title,
+                    "description": "",
+                    "budget":      "",
+                    "date":        "",
+                    "url":         self.full_url(href),
+                })
+            if tasks:
+                break  # нашли через более точный селектор — дальше не ищем
+
         logger.info(f"[YouDo] _parse_by_links: {len(tasks)} ссылок на задания.")
         return tasks
