@@ -56,6 +56,7 @@ HELP_TEXT = """
 /pause — приостановить
 /resume — возобновить
 /reset_web — сбросить историю веб-заказов (перепроверить заново)
+/test_site Название — запустить парсер прямо сейчас и показать что нашёл
 /test — проверить что бот работает
 /getid — узнать ID закрытого канала
 
@@ -500,6 +501,22 @@ class ManagerBot:
                 "На следующей проверке все заказы будут проанализированы заново.",
                 parse_mode="md",
             )
+
+        # ── /test_site ────────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/test_site (.+)$"))
+        async def cmd_test_site(event):
+            from web_monitor import test_site
+            name  = event.pattern_match.group(1).strip()
+            sites = storage.get_websites()
+            site  = next((s for s in sites if s["name"].lower() == name.lower()), None)
+            if not site:
+                await event.respond(
+                    f"❌ Сайт «{name}» не найден.\nПроверь название через /sites",
+                )
+                return
+            await event.respond(f"⏳ Запускаю парсер для **{name}**...", parse_mode="md")
+            result = await test_site(site)
+            await event.respond(result, parse_mode="md", link_preview=False)
 
         # ── /site_raw_on /site_raw_off ────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/site_raw_on (.+)$"))

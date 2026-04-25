@@ -208,6 +208,60 @@ async def check_generic(session, site: dict, bot_client, user_id: int):
         logger.error(f"[{name}] Ошибка: {e}")
 
 
+async def test_site(site: dict) -> str:
+    """
+    Запускает парсер для сайта прямо сейчас, игнорирует seen-список и фильтры.
+    Возвращает готовый текст для отправки в Telegram.
+    """
+    url    = site["url"]
+    name   = site["name"]
+    parser = get_parser(url)
+
+    lines = [f"🔬 **Тест парсера — {name}**\n"]
+
+    if not parser:
+        lines.append("⚠️ Специализированного парсера нет — используется generic-режим.")
+        lines.append(f"URL: {url}")
+        return "\n".join(lines)
+
+    lines.append(f"🔧 Парсер: `{parser.__class__.__name__}`")
+    lines.append(f"🔗 URL: {url}\n")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            tasks = await parser.get_tasks(session, url)
+    except Exception as e:
+        lines.append(f"❌ Ошибка парсера: {e}")
+        return "\n".join(lines)
+
+    if not tasks:
+        lines.append("❌ **Парсер вернул 0 заказов.**")
+        lines.append("")
+        lines.append("Возможные причины:")
+        lines.append("• Playwright не установлен на сервере (`pip install playwright && playwright install chromium`)")
+        lines.append("• Сайт изменил HTML-структуру")
+        lines.append("• Сайт блокирует запросы (нужен proxy)")
+        return "\n".join(lines)
+
+    lines.append(f"✅ Найдено заказов: **{len(tasks)}**\n")
+    lines.append("**Первые 5:**\n")
+
+    for i, t in enumerate(tasks[:5], 1):
+        title = (t.get("title") or "—")[:80]
+        budget = t.get("budget") or ""
+        desc   = (t.get("description") or "")[:100]
+        url_t  = t.get("url") or ""
+        lines.append(f"{i}. **{title}**")
+        if budget:
+            lines.append(f"   💰 {budget}")
+        if desc:
+            lines.append(f"   {desc}")
+        lines.append(f"   {url_t}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 class WebMonitor:
     def __init__(self, config: dict, bot_client, paused_ref):
         self.config     = config
