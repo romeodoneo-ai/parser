@@ -219,12 +219,15 @@ class YoudoParser(BaseParser):
         if not title:
             return None
 
-        # URL — формат YouDo: /tasks/t-{Id}/
+        # URL — реальный формат YouDo: https://youdo.com/t{Id}
         href = (
             item.get("Url") or item.get("url") or
             item.get("link") or item.get("taskUrl") or
-            f"/tasks/t-{task_id}/"
+            f"/t{task_id}"
         )
+        # Убираем searchRequestId из URL если он есть
+        if "?" in href:
+            href = href.split("?")[0]
         task_url = self.full_url(href)
 
         # Описание
@@ -349,9 +352,10 @@ class YoudoParser(BaseParser):
         tasks = []
         seen  = set()
 
-        # YouDo использует /tasks/t-XXXXXXXX/ для отдельных заданий
+        # YouDo использует /tNNNNNNNN (без слеша и подкатегорий) для отдельных заданий
+        # Например: /t14682758  (иногда с ?searchRequestId=... — убираем)
         selectors = [
-            "a[href*='/tasks/t-']",   # основной формат YouDo
+            "a[href*='/tasks/t-']",   # старый формат (на всякий случай)
             "a[href*='/task/t-']",
             "a[href*='/tasks/']",
             "a[href*='/task/']",
@@ -361,25 +365,51 @@ class YoudoParser(BaseParser):
         for sel in selectors:
             for link in soup.select(sel):
                 href = link.get("href", "")
-                if not href or href in seen or href in SKIP:
+                if not href or href in SKIP:
                     continue
-                # Пропускаем категорийные и фильтровые страницы
-                if href.count("/") < 2:
+                # Убираем query string
+                clean_href = href.split("?")[0].rstrip("/")
+                if clean_href in seen:
                     continue
-                seen.add(href)
+                if clean_href.count("/") < 2:
+                    continue
+                seen.add(clean_href)
                 title = link.get_text(strip=True)
                 if len(title) < 5:
                     continue
                 tasks.append({
-                    "id":          href.rstrip("/").split("/")[-1],
+                    "id":          clean_href.split("/")[-1],
                     "title":       title,
                     "description": "",
                     "budget":      "",
                     "date":        "",
-                    "url":         self.full_url(href),
+                    "url":         self.full_url(clean_href),
                 })
             if tasks:
-                break  # нашли через более точный селектор — дальше не ищем
+                break
+
+        # Реальный формат YouDo: /t14682758 (буква t + цифры, без дополнительных слешей)
+        if not tasks:
+            for link in soup.find_all("a", href=True):
+                href = link.get("href", "")
+                clean_href = href.split("?")[0].rstrip("/")
+                # Матчим /tNNNNNNNN — только буква t и цифры после слеша
+                if not re.match(r'^/t\d+$', clean_href):
+                    continue
+                if clean_href in seen:
+                    continue
+                seen.add(clean_href)
+                title = link.get_text(strip=True)
+                if len(title) < 5:
+                    continue
+                tasks.append({
+                    "id":          clean_href[2:],  # убираем /t
+                    "title":       title,
+                    "description": "",
+                    "budget":      "",
+                    "date":        "",
+                    "url":         self.full_url(clean_href),
+                })
 
         logger.info(f"[YouDo] _parse_by_links: {len(tasks)} ссылок на задания.")
         return tasks
