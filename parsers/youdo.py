@@ -134,24 +134,32 @@ class YoudoParser(BaseParser):
     def _extract_from_json(self, data) -> list:
         """Пробует достать задания из разных форматов JSON-ответа YouDo."""
         tasks = []
-
-        # Вариант 1: {tasks: [...]} или {items: [...]} или {result: [...]}
         candidates = []
+
         if isinstance(data, list):
             candidates = data
         elif isinstance(data, dict):
-            for key in ("tasks", "items", "result", "data", "assignments", "orders"):
-                val = data.get(key)
-                if isinstance(val, list) and val:
-                    candidates = val
-                    break
-                if isinstance(val, dict):
-                    # {data: {tasks: [...]}}
-                    for subkey in ("tasks", "items", "result", "assignments"):
-                        sub = val.get(subkey)
-                        if isinstance(sub, list) and sub:
-                            candidates = sub
-                            break
+            # ── Формат YouDo: {ResultObject: {Items: [...]}} ──────────────
+            ro = data.get("ResultObject") or data.get("resultObject")
+            if isinstance(ro, dict):
+                items = ro.get("Items") or ro.get("items") or []
+                if isinstance(items, list):
+                    candidates = items
+
+            # ── Универсальные ключи (нижний регистр) ──────────────────────
+            if not candidates:
+                for key in ("tasks", "items", "result", "data", "assignments", "orders"):
+                    val = data.get(key)
+                    if isinstance(val, list) and val:
+                        candidates = val
+                        break
+                    if isinstance(val, dict):
+                        for subkey in ("tasks", "items", "result", "assignments",
+                                       "Items", "Tasks"):
+                            sub = val.get(subkey)
+                            if isinstance(sub, list) and sub:
+                                candidates = sub
+                                break
 
         for item in candidates[:50]:
             if not isinstance(item, dict):
@@ -164,51 +172,65 @@ class YoudoParser(BaseParser):
 
     def _item_to_task(self, item: dict):
         """Конвертирует один JSON-объект задания в стандартный формат."""
-        # ID
-        task_id = str(item.get("id") or item.get("taskId") or item.get("guid") or "")
+        # ID — YouDo использует 'Id' (с заглавной), стандарт — 'id'
+        task_id = str(
+            item.get("Id") or item.get("id") or
+            item.get("taskId") or item.get("guid") or ""
+        )
         if not task_id:
             return None
 
-        # Заголовок
+        # Заголовок — YouDo использует 'Name'
         title = (
-            item.get("title") or item.get("name") or
-            item.get("taskTitle") or item.get("subject") or ""
-        ).strip()
+            item.get("Name") or item.get("name") or
+            item.get("title") or item.get("taskTitle") or item.get("subject") or ""
+        )
+        if isinstance(title, str):
+            title = title.strip()
         if not title:
             return None
 
-        # URL
+        # URL — формат YouDo: /tasks/t-{Id}/
         href = (
-            item.get("url") or item.get("link") or
-            item.get("taskUrl") or f"/tasks/t-{task_id}/"
+            item.get("Url") or item.get("url") or
+            item.get("link") or item.get("taskUrl") or
+            f"/tasks/t-{task_id}/"
         )
         task_url = self.full_url(href)
 
         # Описание
         description = (
-            item.get("description") or item.get("text") or
-            item.get("taskDescription") or item.get("body") or ""
-        ).strip()
+            item.get("Description") or item.get("description") or
+            item.get("text") or item.get("body") or ""
+        )
+        description = (description or "").strip()[:500]
 
-        # Бюджет
-        price = item.get("price") or item.get("budget") or item.get("reward") or {}
-        if isinstance(price, dict):
-            budget = str(price.get("amount") or price.get("value") or "")
-            currency = price.get("currency", "")
-            budget = f"{budget} {currency}".strip() if budget else ""
+        # Бюджет — YouDo использует 'PriceAmount'
+        price_amount = item.get("PriceAmount") or item.get("priceAmount")
+        if price_amount is not None and price_amount != 0:
+            budget = f"{price_amount} ₽"
         else:
-            budget = str(price) if price else ""
+            price = item.get("price") or item.get("budget") or item.get("reward") or {}
+            if isinstance(price, dict):
+                val = price.get("amount") or price.get("value") or ""
+                cur = price.get("currency", "₽")
+                budget = f"{val} {cur}".strip() if val else ""
+            else:
+                budget = str(price) if price else ""
+
+        # Категория (дополнительно для контекста)
+        category = item.get("CategoryFlag") or item.get("categoryFlag") or ""
 
         # Дата
         date = str(
-            item.get("createdAt") or item.get("date") or
-            item.get("publishedAt") or item.get("created") or ""
+            item.get("CreatedDate") or item.get("createdAt") or
+            item.get("date") or item.get("publishedAt") or ""
         )[:10]
 
         return {
             "id":          task_id,
             "title":       title,
-            "description": description[:500],
+            "description": (f"[{category}] " if category else "") + description,
             "budget":      budget,
             "date":        date,
             "url":         task_url,
@@ -264,10 +286,11 @@ class YoudoParser(BaseParser):
         """
         tasks = []
 
-        # Пробуем прямой API (известные эндпоинты YouDo)
+        # Пробуем прямой API YouDo (эндпоинт подтверждён из логов)
         api_urls = [
+            "https://youdo.com/api/tasks/tasks/?count=30&page=0&status=opened",
+            "https://youdo.com/api/tasks/tasks/?count=30",
             "https://youdo.com/api/tasks/?count=30&page=0&status=opened",
-            "https://youdo.com/api/assignments/?count=30&status=opened",
         ]
         for api_url in api_urls:
             try:
