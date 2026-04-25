@@ -6,6 +6,9 @@
   2. HTML-парсинг через Playwright — если JSON не поймали (только title+url).
   3. Прямой HTTP к API — если Playwright недоступен.
 
+YouDo фильтрует задачи клиентски: API всегда отдаёт tasks/tasks/ без
+параметра категории. Фильтрация происходит по полю CategoryFlag в ответе.
+
 https://youdo.com/tasks-all-opened-all
 """
 
@@ -19,6 +22,22 @@ try:
     PLAYWRIGHT_OK = True
 except ImportError:
     PLAYWRIGHT_OK = False
+
+# CategoryFlag значения для IT/разработки на YouDo.
+# Логи покажут полный список — добавляйте сюда нужные.
+IT_FLAGS = {
+    "computerhelp",   # Компьютерная помощь / IT
+    "computers",      # Компьютеры (возможный родительский флаг)
+    "it",             # IT (возможный флаг)
+    "programming",    # Программирование
+    "webdesign",      # Веб-дизайн/разработка
+    "development",    # Разработка
+    "software",       # Разработка ПО
+    "mobiledev",      # Мобильная разработка
+    "web",            # Веб
+    "1c",             # 1С
+    "seo",            # SEO
+}
 
 
 class YoudoParser(BaseParser):
@@ -58,35 +77,32 @@ class YoudoParser(BaseParser):
                 )
                 page = await context.new_page()
 
-                # Ловим ВСЕ ответы API, логируем категории чтобы найти IT-фильтр
-                capture_active = [False]
-
                 async def on_response(response):
                     if response.status != 200:
                         return
-                    if "youdo.com/api/" not in response.url:
+                    if "youdo.com/api/tasks/tasks" not in response.url:
                         return
                     ct = response.headers.get("content-type", "")
                     if "json" not in ct:
                         return
                     try:
                         data = await response.json()
-                        # Логируем любой API-ответ с задачами, до и после клика
-                        candidates = self._raw_candidates(data)
-                        if candidates:
-                            first = candidates[0] if candidates else {}
-                            cat_fields = {k: v for k, v in first.items()
-                                          if any(s in k.lower() for s in
-                                                 ("cat", "rubric", "tag", "type", "kind", "section"))}
-                            logger.info(
-                                f"[YouDo] API {'[POST-CLICK]' if capture_active[0] else '[PRE-CLICK]'} "
-                                f"{response.url} → {len(candidates)} задач | "
-                                f"пример категорий: {cat_fields}"
-                            )
-                            if capture_active[0]:
-                                found = self._extract_from_json(data)
-                                if found:
-                                    captured_tasks.extend(found)
+                        raw = self._raw_candidates(data)
+                        if not raw:
+                            return
+                        # Логируем все уникальные CategoryFlag для диагностики
+                        all_flags = sorted({
+                            str(item.get("CategoryFlag") or "")
+                            for item in raw if isinstance(item, dict)
+                        } - {""})
+                        logger.info(
+                            f"[YouDo] API {response.url} → {len(raw)} задач | "
+                            f"все CategoryFlag: {all_flags}"
+                        )
+                        found = self._extract_from_json(data)
+                        logger.info(f"[YouDo] После IT-фильтра: {len(found)} задач")
+                        if found:
+                            captured_tasks.extend(found)
                     except Exception as e:
                         logger.debug(f"[YouDo] JSON ошибка {response.url}: {e}")
 
@@ -108,28 +124,8 @@ class YoudoParser(BaseParser):
                     logger.warning("[YouDo] Задания не появились за 20 сек.")
                     await page.wait_for_timeout(2000)
 
-                # Включаем захват и кликаем на "Разработка ПО"
-                capture_active[0] = True
-                try:
-                    await page.evaluate("""
-                        () => {
-                            const all = [...document.querySelectorAll('*')];
-                            const el = all.find(
-                                e => e.childNodes.length === 1
-                                  && e.textContent.trim() === 'Разработка ПО'
-                            );
-                            if (el) el.click();
-                        }
-                    """)
-                    logger.info("[YouDo] Клик по 'Разработка ПО' — ждём IT-ответ")
-                    await page.wait_for_timeout(5000)
-                except Exception as e:
-                    logger.warning(f"[YouDo] Не удалось кликнуть фильтр: {e}")
-
-                # Прокрутка для подгрузки lazy-load
-                for _ in range(3):
-                    await page.evaluate("window.scrollBy(0, 800)")
-                    await page.wait_for_timeout(700)
+                # Небольшая пауза чтобы on_response успел обработать ответ
+                await page.wait_for_timeout(2000)
 
                 html = await page.content()
                 await browser.close()
@@ -137,7 +133,6 @@ class YoudoParser(BaseParser):
         except Exception as e:
             logger.error(f"[YouDo] Playwright ошибка: {e}")
 
-        # JSON-перехват дал полные данные — возвращаем
         if captured_tasks:
             return captured_tasks
 
@@ -164,35 +159,19 @@ class YoudoParser(BaseParser):
         return []
 
     def _extract_from_json(self, data) -> list:
-        """Извлекает задания из JSON-ответа YouDo API."""
-        candidates = []
-
-        if isinstance(data, list):
-            candidates = data
-        elif isinstance(data, dict):
-            ro = data.get("ResultObject") or data.get("resultObject")
-            if isinstance(ro, dict):
-                items = ro.get("Items") or ro.get("items") or []
-                if isinstance(items, list):
-                    candidates = items
-
-            if not candidates:
-                for key in ("tasks", "items", "result", "data", "assignments", "orders"):
-                    val = data.get(key)
-                    if isinstance(val, list) and val:
-                        candidates = val
-                        break
-                    if isinstance(val, dict):
-                        for subkey in ("tasks", "items", "result", "assignments", "Items", "Tasks"):
-                            sub = val.get(subkey)
-                            if isinstance(sub, list) and sub:
-                                candidates = sub
-                                break
+        """Извлекает IT-задания из JSON-ответа YouDo API."""
+        candidates = self._raw_candidates(data)
 
         tasks = []
         for item in candidates[:100]:
             if not isinstance(item, dict):
                 continue
+
+            # Фильтр по CategoryFlag — только IT-категории
+            flag = (item.get("CategoryFlag") or item.get("categoryFlag") or "").lower()
+            if flag and flag not in IT_FLAGS:
+                continue
+
             task = self._item_to_task(item)
             if task:
                 tasks.append(task)
