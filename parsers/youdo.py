@@ -186,17 +186,22 @@ class YoudoParser(BaseParser):
         if all_flags:
             logger.info(f"[YouDo] CategoryFlag в ответе: {sorted(all_flags)}")
 
+        skipped_flags = set()
         for item in candidates[:100]:
             if not isinstance(item, dict):
                 continue
             # Фильтр по категории "Разработка ПО"
             flag = str(item.get("CategoryFlag") or item.get("categoryFlag") or "").lower()
             if IT_CATEGORY_FLAGS and flag and flag not in IT_CATEGORY_FLAGS:
+                skipped_flags.add(flag)
                 continue
             task = self._item_to_task(item)
             if task:
                 tasks.append(task)
 
+        if skipped_flags:
+            logger.info(f"[YouDo] Отфильтровано по категории (не IT): {sorted(skipped_flags)}")
+        logger.info(f"[YouDo] _extract_from_json: кандидатов={len(candidates)}, прошло={len(tasks)}")
         return tasks
 
     def _item_to_task(self, item: dict):
@@ -349,67 +354,30 @@ class YoudoParser(BaseParser):
         return tasks
 
     def _parse_by_links(self, soup) -> list:
+        """Ищет только реальные ссылки на задания формата /tNNNNNNNN."""
         tasks = []
         seen  = set()
 
-        # YouDo использует /tNNNNNNNN (без слеша и подкатегорий) для отдельных заданий
-        # Например: /t14682758  (иногда с ?searchRequestId=... — убираем)
-        selectors = [
-            "a[href*='/tasks/t-']",   # старый формат (на всякий случай)
-            "a[href*='/task/t-']",
-            "a[href*='/tasks/']",
-            "a[href*='/task/']",
-        ]
-        SKIP = {"/tasks-all-opened-all", "/tasks/", "/task/", "/tasks", "/task"}
-
-        for sel in selectors:
-            for link in soup.select(sel):
-                href = link.get("href", "")
-                if not href or href in SKIP:
-                    continue
-                # Убираем query string
-                clean_href = href.split("?")[0].rstrip("/")
-                if clean_href in seen:
-                    continue
-                if clean_href.count("/") < 2:
-                    continue
-                seen.add(clean_href)
-                title = link.get_text(strip=True)
-                if len(title) < 5:
-                    continue
-                tasks.append({
-                    "id":          clean_href.split("/")[-1],
-                    "title":       title,
-                    "description": "",
-                    "budget":      "",
-                    "date":        "",
-                    "url":         self.full_url(clean_href),
-                })
-            if tasks:
-                break
-
-        # Реальный формат YouDo: /t14682758 (буква t + цифры, без дополнительных слешей)
-        if not tasks:
-            for link in soup.find_all("a", href=True):
-                href = link.get("href", "")
-                clean_href = href.split("?")[0].rstrip("/")
-                # Матчим /tNNNNNNNN — только буква t и цифры после слеша
-                if not re.match(r'^/t\d+$', clean_href):
-                    continue
-                if clean_href in seen:
-                    continue
-                seen.add(clean_href)
-                title = link.get_text(strip=True)
-                if len(title) < 5:
-                    continue
-                tasks.append({
-                    "id":          clean_href[2:],  # убираем /t
-                    "title":       title,
-                    "description": "",
-                    "budget":      "",
-                    "date":        "",
-                    "url":         self.full_url(clean_href),
-                })
+        for link in soup.find_all("a", href=True):
+            href = link.get("href", "")
+            clean_href = href.split("?")[0].rstrip("/")
+            # Реальный формат YouDo: /t14682758 (буква t + только цифры)
+            if not re.match(r'^/t\d{5,}$', clean_href):
+                continue
+            if clean_href in seen:
+                continue
+            seen.add(clean_href)
+            title = link.get_text(strip=True)
+            if len(title) < 5:
+                continue
+            tasks.append({
+                "id":          clean_href[2:],
+                "title":       title,
+                "description": "",
+                "budget":      "",
+                "date":        "",
+                "url":         self.full_url(clean_href),
+            })
 
         logger.info(f"[YouDo] _parse_by_links: {len(tasks)} ссылок на задания.")
         return tasks
