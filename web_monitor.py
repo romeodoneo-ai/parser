@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from datetime import datetime, timezone
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -135,11 +136,23 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             logger.info(f"[{name}] Первый запуск — загружено {len(tasks)} заказов, уведомления не отправлялись.")
             return
 
+        now = datetime.now(timezone.utc)
         new_count = 0
         for task in tasks:
             task_url = task.get("url", "")
             if not task_url:
                 continue
+
+            # Пропускаем старые заказы (старше 7 дней)
+            task_date = task.get("date", "")
+            if task_date:
+                try:
+                    age_days = (now - datetime.fromisoformat(task_date).replace(tzinfo=timezone.utc)).days
+                    if age_days > 7:
+                        storage.mark_web_task_seen(task_url, name)
+                        continue
+                except ValueError:
+                    pass
 
             # Уже видели этот заказ?
             if storage.is_web_task_seen(task_url):
