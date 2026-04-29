@@ -136,7 +136,7 @@ async def main():
 
     # Создаём и настраиваем компоненты
     monitor = Monitor(cfg, user_client, notify_client)
-    manager = ManagerBot(cfg, manager_client, monitor)
+    manager = ManagerBot(cfg, manager_client, monitor, notify_client=notify_client)
     web_monitor = WebMonitor(cfg, notify_client, lambda: monitor.paused)
 
     monitor.setup()

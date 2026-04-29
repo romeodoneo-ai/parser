@@ -3,9 +3,11 @@
 прямо из Telegram, без перезапуска программы.
 """
 
+import io
+import json
 import logging
 import re
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 
 import storage
 
@@ -53,6 +55,9 @@ HELP_TEXT = """
 /contacts_tg_on — контакты для Telegram вкл
 /contacts_tg_off — контакты для Telegram выкл
 
+**Спам**
+/export_spam — выгрузить все помеченные как спам (JSON-файл для анализа)
+
 **Управление**
 /pause — приостановить
 /resume — возобновить
@@ -66,9 +71,10 @@ HELP_TEXT = """
 
 
 class ManagerBot:
-    def __init__(self, config: dict, bot_client: TelegramClient, monitor):
+    def __init__(self, config: dict, bot_client: TelegramClient, monitor, notify_client: TelegramClient = None):
         self.config = config
         self.bot = bot_client
+        self.notify_client = notify_client or bot_client
         self.monitor = monitor
         self.your_user_id: int = config["telegram"]["your_user_id"]
 
@@ -214,6 +220,40 @@ class ManagerBot:
                 lines = "\n".join(f"• {kw}" for kw in not_found)
                 text += f"\n\n❌ Не найдено:\n{lines}"
             await event.respond(text.strip(), parse_mode="md")
+
+        # ── Спам: кнопка на уведомлениях ─────────────────────────
+        @self.notify_client.on(events.CallbackQuery(pattern=rb"spam:(\d+)"))
+        async def on_spam_button(event):
+            match_id = int(event.data.split(b":")[1])
+            match = storage.get_match_by_id(match_id)
+            if match:
+                storage.mark_spam(
+                    match_id,
+                    match.get("channel", ""),
+                    match.get("matched_keywords", ""),
+                    match.get("preview", ""),
+                )
+            await event.answer("🚫 Помечено как спам", alert=False)
+            try:
+                await event.edit(buttons=None)
+            except Exception:
+                pass
+
+        # ── /export_spam ─────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/export_spam$"))
+        async def cmd_export_spam(event):
+            entries = storage.get_spam_entries()
+            if not entries:
+                await event.respond("Список спама пуст — нажимайте кнопку 🚫 на уведомлениях.")
+                return
+            data = json.dumps(entries, ensure_ascii=False, indent=2)
+            buf = io.BytesIO(data.encode("utf-8"))
+            buf.name = "spam_report.json"
+            await self.bot.send_file(
+                uid, buf,
+                caption=f"🚫 Спам-отчёт: **{len(entries)}** записей.\n\nЗакиньте файл в ИИ и попросите проанализировать — какие ключевые слова и каналы дают нерелевантные результаты.",
+                parse_mode="md",
+            )
 
         # ── Фильтр контактов ─────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/contacts$"))

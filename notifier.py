@@ -10,6 +10,7 @@ def format_notification(
     text: str,
     matched_keywords,
     message_link=None,
+    user_link=None,
 ) -> str:
     """Собирает красивую карточку для уведомления."""
 
@@ -32,7 +33,12 @@ def format_notification(
         "─" * 30,
     ]
 
+    link_parts = []
     if message_link:
-        lines.append(f"\n[🔗 Открыть в Telegram]({message_link})")
+        link_parts.append(f"[🔗 Сообщение]({message_link})")
+    if user_link:
+        link_parts.append(f"[💬 Написать]({user_link})")
+    if link_parts:
+        lines.append("\n" + "  ·  ".join(link_parts))
 
     return "\n".join(lines)

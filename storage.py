@@ -84,6 +84,15 @@ def init_db():
                 matched_keywords TEXT,
                 matched_at       TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS spam_marks (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id   INTEGER,
+                channel    TEXT,
+                keywords   TEXT,
+                preview    TEXT,
+                marked_at  TEXT NOT NULL
+            );
         """)
         # Миграция: добавляем raw_mode если колонки ещё нет
         try:
@@ -114,13 +123,14 @@ def mark_seen(channel: str, message_id: int):
             pass
 
 
-def save_match(channel: str, message_id: int, preview: str, keywords: list):
+def save_match(channel: str, message_id: int, preview: str, keywords: list) -> int:
     with get_conn() as conn:
-        conn.execute(
+        cursor = conn.execute(
             "INSERT INTO matches (channel, message_id, preview, matched_keywords, matched_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (channel, message_id, preview[:500], ", ".join(keywords), datetime.now().isoformat()),
         )
+        return cursor.lastrowid
 
 
 # ─────────────── Каналы ───────────────
@@ -389,6 +399,31 @@ def get_matches_since(hours: float):
             (since,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def mark_spam(match_id: int, channel: str, keywords: str, preview: str):
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO spam_marks (match_id, channel, keywords, preview, marked_at) VALUES (?, ?, ?, ?, ?)",
+                (match_id, channel, keywords, preview[:500], datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            pass
+
+def get_spam_entries() -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT match_id, channel, keywords, preview, marked_at FROM spam_marks ORDER BY marked_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def get_match_by_id(match_id: int) -> dict:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT channel, matched_keywords, preview FROM matches WHERE id=?", (match_id,)
+        ).fetchone()
+        return dict(row) if row else {}
 
 
 def get_recent_matches(limit: int = 5):

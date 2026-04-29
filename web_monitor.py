@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 from bs4 import BeautifulSoup
+from telethon import Button
 
 import storage
 import filters
@@ -203,10 +204,13 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             contacts_str = filters.extract_contact_context(text)
 
             # Сохраняем и отправляем
-            storage.save_match(task_url, None, listing_text[:500], keywords or ["веб"])
+            match_id = storage.save_match(task_url, None, listing_text[:500], keywords or ["веб"])
             notification = format_task_notification(task, name, contacts_str)
 
-            await bot_client.send_message(user_id, notification, parse_mode="md", link_preview=False)
+            await bot_client.send_message(
+                user_id, notification, parse_mode="md", link_preview=False,
+                buttons=[[Button.inline("🚫 Спам", f"spam:{match_id}".encode())]],
+            )
             logger.info(f"[{name}] ✅ Новый заказ: {task.get('title', '')[:60]}")
 
         logger.info(f"[{name}] Проверено {len(tasks)} заказов, новых: {new_count}")

@@ -4,7 +4,7 @@
 """
 
 import logging
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.tl.types import Channel, Chat, User
 
 import storage
@@ -72,23 +72,35 @@ class Monitor:
                 private_id = chat_id.lstrip("-")[3:]
                 message_link = f"https://t.me/c/{private_id}/{msg_id}"
 
+            # Ссылка на личку с отправителем (только для групп, не каналов)
+            user_link = None
+            try:
+                sender = await event.get_sender()
+                if isinstance(sender, User) and sender.username:
+                    user_link = f"https://t.me/{sender.username}"
+                elif isinstance(sender, User) and sender.id:
+                    user_link = f"tg://user?id={sender.id}"
+            except Exception:
+                pass
+
             # Фильтр контактов для Telegram (если включён)
             if storage.contacts_filter_tg_enabled() and not filters.has_contacts(text):
                 logger.info(f"Ключевые слова есть, но нет контактов — пропускаем.")
                 return
 
             # Сохраняем находку в историю
-            storage.save_match(chat_id, msg_id, text, keywords)
+            channel_display = f"@{channel_username}" if channel_username else channel_title
+            match_id = storage.save_match(chat_id, msg_id, text, keywords)
 
             # Отправляем уведомление
-            channel_display = f"@{channel_username}" if channel_username else channel_title
-            notification = format_notification(channel_display, text, keywords, message_link)
+            notification = format_notification(channel_display, text, keywords, message_link, user_link)
 
             await self.bot_client.send_message(
                 self.your_user_id,
                 notification,
                 parse_mode="md",
                 link_preview=False,
+                buttons=[[Button.inline("🚫 Спам", f"spam:{match_id}".encode())]],
             )
 
             logger.info(f"[+] Заказ найден — {channel_display} | слова: {keywords}")
