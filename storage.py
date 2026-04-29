@@ -176,6 +176,11 @@ def remove_keyword(keyword: str) -> bool:
         cursor = conn.execute("UPDATE keywords SET active=0 WHERE keyword=?", (keyword,))
         return cursor.rowcount > 0
 
+def clear_keywords() -> int:
+    with get_conn() as conn:
+        cursor = conn.execute("UPDATE keywords SET active=0 WHERE active=1")
+        return cursor.rowcount
+
 
 # ─────────────── Настройки ───────────────
 

@@ -28,6 +28,7 @@ HELP_TEXT = """
 /keywords — список слов
 /add_kw слово1, слово2 — добавить
 /remove_kw слово1, слово2 — убрать
+/clear_kw — удалить все слова сразу
 
 **Слова-исключения**
 /excludes — список исключений
@@ -184,6 +185,15 @@ class ManagerBot:
             else:
                 lines = "\n".join(f"• {kw}" for kw in keywords)
                 await event.respond(f"✅ Добавлено **{len(keywords)}** слов:\n\n{lines}", parse_mode="md")
+
+        # ── /clear_kw ────────────────────────────────────────────
+        @self.bot.on(events.NewMessage(from_users=uid, pattern=r"^/clear_kw$"))
+        async def cmd_clear_kw(event):
+            count = storage.clear_keywords()
+            if count:
+                await event.respond(f"🗑 Удалено **{count}** ключевых слов.", parse_mode="md")
+            else:
+                await event.respond("Список уже пуст.")
 
         # ── /remove_kw слово ─────────────────────────────────────
         @self.bot.on(events.NewMessage(from_users=uid, pattern=re.compile(r"^/remove_kw\s+([\s\S]+)", re.IGNORECASE)))
