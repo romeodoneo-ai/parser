@@ -114,7 +114,7 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
     need_keywords = False  # для сайтов с парсером категория уже отфильтрована сервером
 
     try:
-        tasks = await parser.get_tasks(session, url)
+        tasks = await parser.get_tasks(session, url, seen_checker=storage.is_web_task_seen)
 
         if not tasks:
             logger.info(f"[{name}] Заказов не найдено (парсер вернул пустой список).")

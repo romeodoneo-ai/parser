@@ -67,6 +67,10 @@ class Monitor:
             message_link = None
             if channel_username:
                 message_link = f"https://t.me/{channel_username}/{msg_id}"
+            elif chat_id.lstrip("-").startswith("100"):
+                # Закрытый канал/супергруппа: убираем -100 префикс
+                private_id = chat_id.lstrip("-")[3:]
+                message_link = f"https://t.me/c/{private_id}/{msg_id}"
 
             # Фильтр контактов для Telegram (если включён)
             if storage.contacts_filter_tg_enabled() and not filters.has_contacts(text):
