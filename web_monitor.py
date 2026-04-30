@@ -139,19 +139,21 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             if not task_url:
                 continue
 
-            # Пропускаем старые заказы (старше 3 часов)
+            # Пропускаем всё что не свежее (старше 3 часов или без даты)
             task_date = task.get("date", "")
-            if task_date:
-                try:
-                    parsed_date = datetime.fromisoformat(task_date.replace("Z", "+00:00"))
-                    if parsed_date.tzinfo is None:
-                        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
-                    age_minutes = (now - parsed_date).total_seconds() / 60
-                    if age_minutes > 180:
-                        storage.mark_web_task_seen(task_url, name)
-                        continue
-                except (ValueError, TypeError):
-                    pass
+            try:
+                if not task_date:
+                    raise ValueError("no date")
+                parsed_date = datetime.fromisoformat(task_date.replace("Z", "+00:00"))
+                if parsed_date.tzinfo is None:
+                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                age_minutes = (now - parsed_date).total_seconds() / 60
+                if age_minutes > 180:
+                    storage.mark_web_task_seen(task_url, name)
+                    continue
+            except (ValueError, TypeError):
+                storage.mark_web_task_seen(task_url, name)
+                continue
 
             # Уже видели этот заказ?
             if storage.is_web_task_seen(task_url):
