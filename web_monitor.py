@@ -125,17 +125,12 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
         # Первый запуск — ни один заказ ещё не помечен как виденный
         is_first_run = not any(storage.is_web_task_seen(t.get("url", "")) for t in tasks if t.get("url"))
         if is_first_run:
-            for task in tasks:
-                task_url = task.get("url", "")
-                if task_url:
-                    storage.mark_web_task_seen(task_url, name)
             await bot_client.send_message(
                 user_id,
-                f"📋 **{name}** — первый запуск\n\nЗагружено **{len(tasks)}** заказов за последнее время.\nТеперь слежу за новыми в реальном времени.",
+                f"📋 **{name}** — первый запуск\n\nОтправляю свежие заказы за последние 3 часа.",
                 parse_mode="md",
             )
-            logger.info(f"[{name}] Первый запуск — загружено {len(tasks)} заказов, уведомления не отправлялись.")
-            return
+            logger.info(f"[{name}] Первый запуск — отправляем свежие заказы за 3 часа.")
 
         now = datetime.now(timezone.utc)
         new_count = 0
@@ -144,15 +139,18 @@ async def check_with_parser(session, site: dict, parser, bot_client, user_id: in
             if not task_url:
                 continue
 
-            # Пропускаем старые заказы (старше 7 дней)
+            # Пропускаем старые заказы (старше 3 часов)
             task_date = task.get("date", "")
             if task_date:
                 try:
-                    age_days = (now - datetime.fromisoformat(task_date).replace(tzinfo=timezone.utc)).days
-                    if age_days > 7:
+                    parsed_date = datetime.fromisoformat(task_date.replace("Z", "+00:00"))
+                    if parsed_date.tzinfo is None:
+                        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                    age_minutes = (now - parsed_date).total_seconds() / 60
+                    if age_minutes > 180:
                         storage.mark_web_task_seen(task_url, name)
                         continue
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
 
             # Уже видели этот заказ?

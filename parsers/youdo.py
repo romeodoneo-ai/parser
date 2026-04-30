@@ -258,7 +258,7 @@ class YoudoParser(BaseParser):
         date = str(
             item.get("CreatedDate") or item.get("createdAt") or
             item.get("date") or item.get("publishedAt") or ""
-        )[:10]
+        ).strip()
 
         return {
             "id":          task_id,
