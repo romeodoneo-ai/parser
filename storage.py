@@ -275,6 +275,12 @@ def get_match_by_id(match_id: int) -> dict:
 
 # ─────────────── YouDo задания ───────────────
 
+def has_youdo_seen_any() -> bool:
+    with get_conn() as conn:
+        row = conn.execute("SELECT 1 FROM youdo_seen_tasks LIMIT 1").fetchone()
+        return row is not None
+
+
 def is_youdo_seen(task_id: str) -> bool:
     with get_conn() as conn:
         row = conn.execute(

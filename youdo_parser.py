@@ -1,12 +1,11 @@
 """
-Парсер заданий YouDo.com — айти-категории.
-Опрашивает API каждый вызов, возвращает только новые задания.
+Парсер заданий YouDo.com — категория "Разработка ПО".
+Опрашивает API раз в минуту, возвращает только новые задания.
 """
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict
+from typing import List, Dict
 
 import aiohttp
 
@@ -15,6 +14,7 @@ import storage
 logger = logging.getLogger(__name__)
 
 API_URL = "https://youdo.com/api/tasks/tasks/"
+TASK_URL = "https://youdo.com/api/tasks/task/{}/"
 
 HEADERS = {
     "Content-Type": "application/json",
@@ -29,83 +29,53 @@ HEADERS = {
     "Origin": "https://youdo.com",
 }
 
-# Ключевые слова в CategoryFlag для IT-категорий (выясняется из логов)
-IT_FLAG_KEYWORDS = (
-    "разработка", "develop", "programming", "software",
-    "компьютер", "computer", "it ", " it", "tech",
-    "виртуальный", "virtual", "assistant",
-    "дизайн", "design", "photoshop", "figma", "illustrat",
-    "верстк", "frontend", "backend", "web",
-)
-
-# Игнорируем задания старше этого времени
-MAX_AGE_HOURS = 6
-
-
-def _is_it_task(item: Dict) -> bool:
-    flag = str(item.get("CategoryFlag") or "").lower()
-    return any(kw in flag for kw in IT_FLAG_KEYWORDS)
-
-
-def _parse_date(item: Dict) -> Optional[datetime]:
-    """Пробуем разные поля с датой."""
-    for field in ("DateCreate", "DateTimeString", "Date", "CreateDate"):
-        raw = item.get(field)
-        if not raw:
-            continue
-        try:
-            # Убираем 'Z' или временну́ю зону для единообразия
-            raw = raw.replace("Z", "+00:00")
-            return datetime.fromisoformat(raw)
-        except (ValueError, AttributeError):
-            continue
-    return None
-
-
-def _is_fresh(item: Dict) -> bool:
-    dt = _parse_date(item)
-    if dt is None:
-        return True  # если дата не парсится — пропускаем фильтр
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_HOURS)
-    return dt >= cutoff
+# Подкатегории раздела "Разработка ПО"
+IT_SUB_IDS = [148, 146, 62, 63, 244, 245, 147, 246, 108]
 
 
 def _format_price(item: Dict) -> str:
-    amount = item.get("PriceAmount") or item.get("MaxPrice")
-    payment_type = item.get("PaymentType")
-    if payment_type == 2 or not amount:
-        return "Договорная"
-    return f"до {int(amount):,} ₽".replace(",", " ")
+    budget = (item.get("BudgetDescription") or "").strip()
+    if budget:
+        return budget + " ₽"
+    return "Договорная"
 
 
-def _format_notification(item: Dict) -> str:
-    title = item.get("Name", "").strip()
-    description = item.get("Description", "").strip()
-    if len(description) > 400:
-        description = description[:400] + "…"
-    price = _format_price(item)
-    url = item.get("Url", "")
-    if url and not url.startswith("http"):
-        url = f"https://youdo.com{url}"
-
+def _format_notification(title: str, description: str, price: str, url: str) -> str:
     lines = ["🛠 **Новый заказ на YouDo**", ""]
-    if title:
-        lines.append(f"💼 {title}")
+    lines.append(f"💼 {title}")
     if description:
+        if len(description) > 500:
+            description = description[:500] + "…"
         lines.append(f"\n📝 {description}")
     lines.append(f"\n💰 {price}")
-    if url:
-        lines.append(f"🔗 {url}")
+    lines.append(f"🔗 {url}")
     return "\n".join(lines)
+
+
+async def _fetch_description(session: aiohttp.ClientSession, task_id: str) -> str:
+    """Загружает описание задачи с детальной страницы."""
+    try:
+        async with session.get(
+            TASK_URL.format(task_id),
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                return ""
+            data = await resp.json(content_type=None)
+            return (
+                data.get("ResultObject", {})
+                    .get("TaskData", {})
+                    .get("Description", "")
+                or ""
+            ).strip()
+    except Exception:
+        return ""
 
 
 async def fetch_new_tasks() -> List[Dict]:
     """
-    Делает запрос к YouDo API и возвращает список словарей:
-    {'task_id': str, 'text': str}
-    для каждого нового айти-задания.
+    Возвращает список {'task_id': str, 'text': str} для новых заданий.
+    При первом вызове (пустая таблица) только засевает ID без отправки.
     """
     payload = {
         "q": "",
@@ -119,49 +89,66 @@ async def fetch_new_tasks() -> List[Dict]:
         "onlyVacancies": False,
         "onlyVirtual": False,
         "priceMin": "",
+        "sub": IT_SUB_IDS,
         "searchRequestId": str(uuid.uuid4()),
     }
 
     try:
         async with aiohttp.ClientSession(headers=HEADERS) as session:
-            async with session.post(API_URL, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with session.post(
+                API_URL, json=payload, timeout=aiohttp.ClientTimeout(total=15)
+            ) as resp:
                 if resp.status != 200:
                     logger.warning(f"YouDo API вернул {resp.status}")
                     return []
                 data = await resp.json(content_type=None)
+
+            items = []
+            try:
+                items = data["ResultObject"]["Items"]
+            except (KeyError, TypeError):
+                logger.warning("YouDo: неожиданная структура ответа")
+                return []
+
+            if not items:
+                logger.debug("YouDo: список задач пуст")
+                return []
+
+            first_run = not storage.has_youdo_seen_any()
+
+            new_tasks = []
+            for item in items:
+                task_id = str(item.get("Id", ""))
+                if not task_id:
+                    continue
+                if storage.is_youdo_seen(task_id):
+                    continue
+
+                storage.mark_youdo_seen(task_id)
+
+                if first_run:
+                    continue  # сеяние: запоминаем, но не шлём
+
+                title = (item.get("Name") or "Без названия").strip()
+                price = _format_price(item)
+                url = item.get("Url", "")
+                if url and not url.startswith("http"):
+                    url = f"https://youdo.com{url}"
+
+                description = await _fetch_description(session, task_id)
+
+                text = _format_notification(title, description, price, url)
+                new_tasks.append({"task_id": task_id, "text": text})
+
+            if first_run:
+                logger.info(f"YouDo: первый запуск, засеяно {len(items)} заданий")
+            elif new_tasks:
+                logger.info(f"YouDo: {len(new_tasks)} новых заданий")
+            else:
+                logger.debug("YouDo: новых заданий нет")
+
+            return new_tasks
+
     except Exception as e:
-        logger.error(f"Ошибка запроса к YouDo: {e}")
+        logger.error(f"YouDo ошибка: {e}")
         return []
-
-    items = []
-    try:
-        items = data["ResultObject"]["Items"]
-    except (KeyError, TypeError):
-        logger.warning(f"Неожиданная структура ответа YouDo: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-        return []
-
-    if items:
-        sample = {k: items[0].get(k) for k in ("Id", "Name", "CategoryFlag", "PriceAmount", "PaymentType", "Url", "DateCreate", "DateTimeString")}
-        logger.info(f"YouDo sample item: {sample}")
-
-    new_tasks = []
-    for item in items:
-        task_id = str(item.get("Id", ""))
-        if not task_id:
-            continue
-        if not _is_it_task(item):
-            continue
-        if not _is_fresh(item):
-            continue
-        if storage.is_youdo_seen(task_id):
-            continue
-
-        storage.mark_youdo_seen(task_id)
-        new_tasks.append({"task_id": task_id, "text": _format_notification(item)})
-
-    if new_tasks:
-        logger.info(f"YouDo: найдено {len(new_tasks)} новых IT-заданий")
-    else:
-        logger.debug("YouDo: новых IT-заданий нет")
-
-    return new_tasks
