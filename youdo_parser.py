@@ -6,7 +6,7 @@
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, List, Dict
 
 import aiohttp
 
@@ -41,12 +41,12 @@ IT_FLAGS = (
 MAX_AGE_HOURS = 6
 
 
-def _is_it_task(item: dict) -> bool:
+def _is_it_task(item: Dict) -> bool:
     flag = item.get("CategoryFlag", 0)
     return bool(flag & IT_FLAGS)
 
 
-def _parse_date(item: dict) -> Optional[datetime]:
+def _parse_date(item: Dict) -> Optional[datetime]:
     """Пробуем разные поля с датой."""
     for field in ("DateCreate", "DateTimeString", "Date", "CreateDate"):
         raw = item.get(field)
@@ -61,7 +61,7 @@ def _parse_date(item: dict) -> Optional[datetime]:
     return None
 
 
-def _is_fresh(item: dict) -> bool:
+def _is_fresh(item: Dict) -> bool:
     dt = _parse_date(item)
     if dt is None:
         return True  # если дата не парсится — пропускаем фильтр
@@ -71,7 +71,7 @@ def _is_fresh(item: dict) -> bool:
     return dt >= cutoff
 
 
-def _format_price(item: dict) -> str:
+def _format_price(item: Dict) -> str:
     amount = item.get("PriceAmount") or item.get("MaxPrice")
     payment_type = item.get("PaymentType")
     if payment_type == 2 or not amount:
@@ -79,7 +79,7 @@ def _format_price(item: dict) -> str:
     return f"до {int(amount):,} ₽".replace(",", " ")
 
 
-def _format_notification(item: dict) -> str:
+def _format_notification(item: Dict) -> str:
     title = item.get("Name", "").strip()
     description = item.get("Description", "").strip()
     if len(description) > 400:
@@ -100,7 +100,7 @@ def _format_notification(item: dict) -> str:
     return "\n".join(lines)
 
 
-async def fetch_new_tasks() -> list[dict]:
+async def fetch_new_tasks() -> List[Dict]:
     """
     Делает запрос к YouDo API и возвращает список словарей:
     {'task_id': str, 'text': str}
