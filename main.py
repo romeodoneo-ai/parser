@@ -167,6 +167,7 @@ async def main():
                 tasks = await fetch_new_tasks()
                 for task in tasks:
                     await notify_client.send_message(user_id, task["text"], parse_mode="md")
+                    await asyncio.sleep(0.5)
             except Exception as e:
                 logger.error(f"YouDo poll loop error: {e}")
             await asyncio.sleep(60)

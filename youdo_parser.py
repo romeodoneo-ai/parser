@@ -1,8 +1,10 @@
 """
 Парсер заданий YouDo.com — категория "Разработка ПО".
-Опрашивает API раз в минуту, возвращает только новые задания.
+Первый запуск: все открытые задачи от старых к новым.
+Далее: каждую минуту только новые.
 """
 
+import asyncio
 import logging
 import uuid
 from typing import List, Dict
@@ -29,10 +31,10 @@ HEADERS = {
     "Origin": "https://youdo.com",
 }
 
-# Подкатегории раздела "Разработка ПО"
 IT_SUB_IDS = [148, 146, 62, 63, 244, 245, 147, 246, 108]
 
 SETTING_MAX_ID = "youdo_last_max_id"
+SETTING_INIT   = "youdo_initialized"
 
 
 def _format_price(item: Dict) -> str:
@@ -73,86 +75,100 @@ async def _fetch_description(session: aiohttp.ClientSession, task_id: str) -> st
         return ""
 
 
-async def fetch_new_tasks() -> List[Dict]:
-    """
-    Возвращает список {'task_id': str, 'text': str} для новых заданий.
-    Использует максимальный ID задачи как метку времени — всё что выше → новое.
-    При первом запуске только запоминает текущий максимум без отправки.
-    """
+async def _fetch_page(session: aiohttp.ClientSession, page: int) -> List[Dict]:
     payload = {
-        "q": "",
-        "list": "all",
-        "status": "opened",
-        "sortType": 1,
-        "page": 1,
-        "noOffers": False,
-        "onlySbr": False,
-        "onlyB2B": False,
-        "onlyVacancies": False,
-        "onlyVirtual": False,
-        "priceMin": "",
+        "q": "", "list": "all", "status": "opened",
+        "sortType": 1, "page": page,
+        "noOffers": False, "onlySbr": False, "onlyB2B": False,
+        "onlyVacancies": False, "onlyVirtual": False, "priceMin": "",
         "sub": IT_SUB_IDS,
         "searchRequestId": str(uuid.uuid4()),
     }
+    try:
+        async with session.post(
+            API_URL, json=payload, timeout=aiohttp.ClientTimeout(total=15)
+        ) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json(content_type=None)
+            return data["ResultObject"]["Items"]
+    except Exception:
+        return []
+
+
+async def _build_task(session: aiohttp.ClientSession, item: Dict) -> Dict:
+    task_id = str(item["Id"])
+    title = (item.get("Name") or "Без названия").strip()
+    price = _format_price(item)
+    url = item.get("Url", "")
+    if url and not url.startswith("http"):
+        url = f"https://youdo.com{url}"
+    description = await _fetch_description(session, task_id)
+    return {"task_id": task_id, "text": _format_notification(title, description, price, url)}
+
+
+async def fetch_new_tasks() -> List[Dict]:
+    """
+    Первый вызов: возвращает ВСЕ открытые задачи (все страницы), от старых к новым.
+    Последующие: только задачи с ID выше последнего виденного.
+    """
+    initialized = storage.get_setting(SETTING_INIT, "0") == "1"
+    last_max_id = int(storage.get_setting(SETTING_MAX_ID, "0"))
 
     try:
         async with aiohttp.ClientSession(headers=HEADERS) as session:
-            async with session.post(
-                API_URL, json=payload, timeout=aiohttp.ClientTimeout(total=15)
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning(f"YouDo API вернул {resp.status}")
+
+            if not initialized:
+                # Собираем все страницы
+                all_items: List[Dict] = []
+                page = 1
+                while True:
+                    items = await _fetch_page(session, page)
+                    if not items:
+                        break
+                    all_items.extend(items)
+                    if len(items) < 50:
+                        break
+                    page += 1
+                    await asyncio.sleep(0.5)
+
+                if not all_items:
                     return []
-                data = await resp.json(content_type=None)
 
-            try:
-                items = data["ResultObject"]["Items"]
-            except (KeyError, TypeError):
-                logger.warning("YouDo: неожиданная структура ответа")
-                return []
+                # Сортируем от старых к новым (ID возрастает)
+                all_items.sort(key=lambda x: int(x.get("Id") or 0))
+                new_max = int(all_items[-1].get("Id") or 0)
 
-            if not items:
-                logger.debug("YouDo: список пуст")
-                return []
+                storage.set_setting(SETTING_MAX_ID, str(new_max))
+                storage.set_setting(SETTING_INIT, "1")
 
-            # ID задач — целые числа, большее = новее
-            ids = [int(item["Id"]) for item in items if item.get("Id")]
-            if not ids:
-                return []
-            current_max = max(ids)
+                logger.info(f"YouDo: первый запуск, загружено {len(all_items)} задач со всех страниц")
 
-            last_max = int(storage.get_setting(SETTING_MAX_ID, "0"))
+                result = []
+                for item in all_items:
+                    result.append(await _build_task(session, item))
+                return result
 
-            # Первый запуск — запоминаем максимум и ничего не шлём
-            if last_max == 0:
-                storage.set_setting(SETTING_MAX_ID, str(current_max))
-                logger.info(f"YouDo: первый запуск, запомнили max_id={current_max}")
-                return []
+            else:
+                # Обычный режим — только страница 1, только новее last_max_id
+                items = await _fetch_page(session, 1)
+                if not items:
+                    logger.info("YouDo: новых заданий нет")
+                    return []
 
-            # Обычный запуск — шлём только задачи новее last_max
-            new_items = [item for item in items if int(item.get("Id", 0)) > last_max]
+                new_items = [i for i in items if int(i.get("Id") or 0) > last_max_id]
+                if not new_items:
+                    logger.info("YouDo: новых заданий нет")
+                    return []
 
-            if not new_items:
-                logger.info("YouDo: новых заданий нет")
-                return []
+                new_max = max(int(i.get("Id") or 0) for i in new_items)
+                storage.set_setting(SETTING_MAX_ID, str(new_max))
 
-            logger.info(f"YouDo: {len(new_items)} новых заданий (id > {last_max})")
-            storage.set_setting(SETTING_MAX_ID, str(current_max))
-
-            new_tasks = []
-            for item in new_items:
-                task_id = str(item["Id"])
-                title = (item.get("Name") or "Без названия").strip()
-                price = _format_price(item)
-                url = item.get("Url", "")
-                if url and not url.startswith("http"):
-                    url = f"https://youdo.com{url}"
-
-                description = await _fetch_description(session, task_id)
-                text = _format_notification(title, description, price, url)
-                new_tasks.append({"task_id": task_id, "text": text})
-
-            return new_tasks
+                logger.info(f"YouDo: {len(new_items)} новых заданий")
+                result = []
+                for item in new_items:
+                    result.append(await _build_task(session, item))
+                return result
 
     except Exception as e:
         logger.error(f"YouDo ошибка: {e}")
