@@ -42,7 +42,7 @@ MAX_AGE_HOURS = 6
 
 
 def _is_it_task(item: Dict) -> bool:
-    flag = item.get("CategoryFlag", 0)
+    flag = int(item.get("CategoryFlag") or 0)
     return bool(flag & IT_FLAGS)
 
 
