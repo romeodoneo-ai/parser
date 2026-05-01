@@ -29,12 +29,13 @@ HEADERS = {
     "Origin": "https://youdo.com",
 }
 
-# Побитовые флаги IT-категорий
-IT_FLAGS = (
-    4194304  # Разработка ПО
-    | 262144  # Компьютерная помощь
-    | 1048576  # Виртуальный помощник
-    | 512     # Дизайн
+# Ключевые слова в CategoryFlag для IT-категорий (выясняется из логов)
+IT_FLAG_KEYWORDS = (
+    "разработка", "develop", "programming", "software",
+    "компьютер", "computer", "it ", " it", "tech",
+    "виртуальный", "virtual", "assistant",
+    "дизайн", "design", "photoshop", "figma", "illustrat",
+    "верстк", "frontend", "backend", "web",
 )
 
 # Игнорируем задания старше этого времени
@@ -42,8 +43,8 @@ MAX_AGE_HOURS = 6
 
 
 def _is_it_task(item: Dict) -> bool:
-    flag = int(item.get("CategoryFlag") or 0)
-    return bool(flag & IT_FLAGS)
+    flag = str(item.get("CategoryFlag") or "").lower()
+    return any(kw in flag for kw in IT_FLAG_KEYWORDS)
 
 
 def _parse_date(item: Dict) -> Optional[datetime]:
@@ -138,6 +139,10 @@ async def fetch_new_tasks() -> List[Dict]:
     except (KeyError, TypeError):
         logger.warning(f"Неожиданная структура ответа YouDo: {list(data.keys()) if isinstance(data, dict) else type(data)}")
         return []
+
+    if items:
+        sample = {k: items[0].get(k) for k in ("Id", "Name", "CategoryFlag", "PriceAmount", "PaymentType", "Url", "DateCreate", "DateTimeString")}
+        logger.info(f"YouDo sample item: {sample}")
 
     new_tasks = []
     for item in items:
