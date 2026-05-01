@@ -37,7 +37,8 @@ IT_SUB_IDS = [148, 146, 62, 63, 244, 245, 147, 246, 108]
 SETTING_MAX_ID = "youdo_last_max_id"
 SETTING_INIT   = "youdo_initialized"
 
-MAX_INIT_PAGES = 4  # страниц на первый запуск (~200 задач)
+MAX_INIT_PAGES = 6  # страниц на первый запуск (~300 задач)
+DAYS_BACK = 3       # фильтр по дате создания
 
 MONTHS_RU = {
     "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
@@ -121,8 +122,8 @@ def _format_notification(title: str, description: str, price: str, url: str, dat
     return "\n".join(lines)
 
 
-async def _fetch_detail(session: aiohttp.ClientSession, task_id: str, log_full: bool = False) -> dict:
-    """Возвращает {'description': str, 'date_created': str}."""
+async def _fetch_detail(session: aiohttp.ClientSession, task_id: str) -> dict:
+    """Возвращает {'description': str, 'created': datetime | None}."""
     try:
         async with session.get(
             TASK_URL.format(task_id),
@@ -132,14 +133,17 @@ async def _fetch_detail(session: aiohttp.ClientSession, task_id: str, log_full: 
                 return {}
             data = await resp.json(content_type=None)
             task_data = data.get("ResultObject", {}).get("TaskData", {})
-            if log_full:
-                # логируем все поля чтобы найти дату создания
-                logger.info(f"YouDo TaskData keys: {list(task_data.keys())}")
-                date_fields = {k: v for k, v in task_data.items() if "date" in k.lower() or "дата" in k.lower() or "time" in k.lower() or "creat" in k.lower()}
-                logger.info(f"YouDo date fields: {date_fields}")
+            dates = task_data.get("Dates", {})
+            created_str = dates.get("CreationDateTime", "")
+            created = None
+            if created_str:
+                try:
+                    created = datetime.fromisoformat(created_str)
+                except ValueError:
+                    pass
             return {
                 "description": (task_data.get("Description") or "").strip(),
-                "date_created": task_data.get("DateCreate") or task_data.get("CreateDate") or "",
+                "created": created,
             }
     except Exception:
         return {}
@@ -148,7 +152,7 @@ async def _fetch_detail(session: aiohttp.ClientSession, task_id: str, log_full: 
 async def _fetch_page(session: aiohttp.ClientSession, page: int) -> List[Dict]:
     payload = {
         "q": "", "list": "all", "status": "opened",
-        "sortType": 2, "page": page,
+        "sortType": 3, "page": page,
         "lat": 55.755864, "lng": 37.617698,
         "noOffers": False, "onlySbr": False, "onlyB2B": False,
         "onlyVacancies": False, "onlyVirtual": False, "priceMin": "",
@@ -167,7 +171,7 @@ async def _fetch_page(session: aiohttp.ClientSession, page: int) -> List[Dict]:
         return []
 
 
-async def _build_task(session: aiohttp.ClientSession, item: Dict, log_full: bool = False) -> Dict:
+async def _build_task(session: aiohttp.ClientSession, item: Dict) -> Dict:
     task_id = str(item["Id"])
     title = (item.get("Name") or "Без названия").strip()
     price = _format_price(item)
@@ -175,9 +179,10 @@ async def _build_task(session: aiohttp.ClientSession, item: Dict, log_full: bool
     url = item.get("Url", "")
     if url and not url.startswith("http"):
         url = f"https://youdo.com{url}"
-    detail = await _fetch_detail(session, task_id, log_full=log_full)
+    detail = await _fetch_detail(session, task_id)
     return {
         "task_id": task_id,
+        "created": detail.get("created"),
         "text": _format_notification(title, detail.get("description", ""), price, url, date_str),
     }
 
@@ -199,30 +204,43 @@ async def fetch_new_tasks() -> List[Dict]:
                     items = await _fetch_page(session, page)
                     if not items:
                         break
-                    if page == 1:
-                        dates = [i.get("DateTimeString", "") for i in items[:5]]
-                        logger.info(f"YouDo DateTimeString первых задач: {dates}")
                     all_items.extend(items)
                     if len(items) < 50:
                         break
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.3)
 
-                if not all_items:
-                    storage.set_setting(SETTING_INIT, "1")
-                    return []
-
-                # от старых к новым по ID
-                all_items.sort(key=lambda x: int(x.get("Id") or 0))
-                new_max = int(all_items[-1].get("Id") or 0)
-                storage.set_setting(SETTING_MAX_ID, str(new_max))
                 storage.set_setting(SETTING_INIT, "1")
 
-                logger.info(f"YouDo: первый запуск, {len(all_items)} задач, {MAX_INIT_PAGES} страниц")
+                if not all_items:
+                    return []
 
-                result = []
-                for idx, item in enumerate(all_items):
-                    result.append(await _build_task(session, item, log_full=(idx == 0)))
-                return result
+                # фиксируем текущий максимальный ID
+                new_max = max(int(i.get("Id") or 0) for i in all_items)
+                storage.set_setting(SETTING_MAX_ID, str(new_max))
+
+                logger.info(f"YouDo: первый запуск, {len(all_items)} задач со списка, загружаю детали...")
+
+                # параллельная загрузка деталей пачками по 10
+                sem = asyncio.Semaphore(10)
+                async def fetch_with_sem(item):
+                    async with sem:
+                        return await _build_task(session, item)
+
+                tasks_built = await asyncio.gather(*[fetch_with_sem(i) for i in all_items])
+
+                # фильтруем по дате создания (последние DAYS_BACK дней)
+                cutoff = datetime.now().astimezone() - timedelta(days=DAYS_BACK)
+                fresh = []
+                for t in tasks_built:
+                    created = t.get("created")
+                    if created is None or created >= cutoff:
+                        fresh.append(t)
+
+                # от старых к новым
+                fresh.sort(key=lambda t: t.get("created") or datetime.min.replace(tzinfo=cutoff.tzinfo))
+
+                logger.info(f"YouDo: {len(fresh)} задач за последние {DAYS_BACK} дня (из {len(all_items)})")
+                return fresh
 
             else:
                 items = await _fetch_page(session, 1)
