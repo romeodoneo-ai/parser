@@ -13,7 +13,7 @@ from telethon import TelegramClient
 import storage
 from monitor import Monitor
 from manager_bot import ManagerBot
-from youdo_parser import fetch_new_tasks
+from youdo_parser import fetch_new_tasks, set_cookie as set_youdo_cookie
 
 # ─── Папки создаём до всего остального ──────────────────────────────────────
 Path("data").mkdir(exist_ok=True)
@@ -81,6 +81,12 @@ async def main():
             storage.add_keyword(kw)
 
     tg = cfg["telegram"]
+
+    # Кука YouDo для авторизованных запросов (опционально)
+    youdo_cookie = cfg.get("youdo", {}).get("cookie", "")
+    if youdo_cookie:
+        set_youdo_cookie(youdo_cookie)
+        logger.info("YouDo: кука авторизации загружена")
 
     # Прокси (нужен если VPS в России)
     proxy = None

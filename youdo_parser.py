@@ -19,18 +19,29 @@ logger = logging.getLogger(__name__)
 API_URL = "https://youdo.com/api/tasks/tasks/"
 TASK_URL = "https://youdo.com/api/tasks/task/{}/"
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "X-FeatureSetId": "893",
-    "X-Requested-With": "XMLHttpRequest",
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://youdo.com/tasks-all-opened-all",
-    "Origin": "https://youdo.com",
-}
+# Cookie подгружается из config.yaml → youdo.cookie
+_cookie: str = ""
+
+def set_cookie(cookie: str):
+    global _cookie
+    _cookie = cookie
+
+def _make_headers() -> dict:
+    h = {
+        "Content-Type": "application/json",
+        "X-FeatureSetId": "893",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://youdo.com/tasks-all-opened-all",
+        "Origin": "https://youdo.com",
+    }
+    if _cookie:
+        h["Cookie"] = _cookie
+    return h
 
 IT_SUB_IDS = [148, 146, 62, 63, 244, 245, 147, 246, 108]
 
@@ -196,7 +207,7 @@ async def fetch_new_tasks() -> List[Dict]:
     last_max_id = int(storage.get_setting(SETTING_MAX_ID, "0"))
 
     try:
-        async with aiohttp.ClientSession(headers=HEADERS) as session:
+        async with aiohttp.ClientSession(headers=_make_headers()) as session:
 
             if not initialized:
                 all_items: List[Dict] = []
