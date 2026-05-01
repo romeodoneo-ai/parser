@@ -1,13 +1,14 @@
 """
 Парсер заданий YouDo.com — категория "Разработка ПО".
-Первый запуск: все открытые задачи от старых к новым.
+Первый запуск: все задачи за последние 3 дня от старых к новым.
 Далее: каждую минуту только новые.
 """
 
 import asyncio
 import logging
 import uuid
-from typing import List, Dict
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 
 import aiohttp
 
@@ -36,6 +37,68 @@ IT_SUB_IDS = [148, 146, 62, 63, 244, 245, 147, 246, 108]
 SETTING_MAX_ID = "youdo_last_max_id"
 SETTING_INIT   = "youdo_initialized"
 
+DAYS_BACK = 3  # сколько дней назад считается свежим
+
+MONTHS_RU = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4,
+    "мая": 5, "июня": 6, "июля": 7, "августа": 8,
+    "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+}
+
+
+def _parse_date(date_str: str) -> Optional[datetime]:
+    """
+    Парсит YouDo DateTimeString:
+      "30 апреля, 12:00"  →  datetime(2026, 4, 30, 12, 0)
+      "сегодня, 18:41"    →  сегодня в 18:41
+      "вчера, 12:00"      →  вчера в 12:00
+      "Начать 1 мая, 00:00" → May 1
+    """
+    if not date_str:
+        return None
+    s = date_str.strip().lower()
+    # убираем "начать" и подобные префиксы
+    for prefix in ("начать ", "начало ", "до "):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+    now = datetime.now()
+    try:
+        if "сегодня" in s:
+            time_part = s.split(",")[-1].strip()
+            h, m = map(int, time_part.split(":"))
+            return now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if "вчера" in s:
+            time_part = s.split(",")[-1].strip()
+            h, m = map(int, time_part.split(":"))
+            d = now - timedelta(days=1)
+            return d.replace(hour=h, minute=m, second=0, microsecond=0)
+        # "30 апреля, 12:00"
+        parts = s.split(",")
+        date_part = parts[0].strip()
+        time_part = parts[-1].strip() if len(parts) > 1 else "00:00"
+        tokens = date_part.split()
+        if len(tokens) >= 2:
+            day = int(tokens[0])
+            month = MONTHS_RU.get(tokens[1], 0)
+            if month:
+                h, m = map(int, time_part.split(":"))
+                year = now.year
+                # если месяц впереди текущего — это прошлый год
+                if month > now.month:
+                    year -= 1
+                return datetime(year, month, day, h, m)
+    except Exception:
+        pass
+    return None
+
+
+def _is_within_days(date_str: str, days: int) -> bool:
+    dt = _parse_date(date_str)
+    if dt is None:
+        return True  # если не распарсили — не отбрасываем
+    cutoff = datetime.now() - timedelta(days=days)
+    return dt >= cutoff
+
 
 def _format_price(item: Dict) -> str:
     budget = (item.get("BudgetDescription") or "").strip()
@@ -44,9 +107,11 @@ def _format_price(item: Dict) -> str:
     return "Договорная"
 
 
-def _format_notification(title: str, description: str, price: str, url: str) -> str:
+def _format_notification(title: str, description: str, price: str, url: str, date_str: str) -> str:
     lines = ["🛠 **Новый заказ на YouDo**", ""]
     lines.append(f"💼 {title}")
+    if date_str:
+        lines.append(f"📅 {date_str}")
     if description:
         if len(description) > 500:
             description = description[:500] + "…"
@@ -79,6 +144,7 @@ async def _fetch_page(session: aiohttp.ClientSession, page: int) -> List[Dict]:
     payload = {
         "q": "", "list": "all", "status": "opened",
         "sortType": 1, "page": page,
+        "lat": 55.755864, "lng": 37.617698,
         "noOffers": False, "onlySbr": False, "onlyB2B": False,
         "onlyVacancies": False, "onlyVirtual": False, "priceMin": "",
         "sub": IT_SUB_IDS,
@@ -100,16 +166,20 @@ async def _build_task(session: aiohttp.ClientSession, item: Dict) -> Dict:
     task_id = str(item["Id"])
     title = (item.get("Name") or "Без названия").strip()
     price = _format_price(item)
+    date_str = item.get("DateTimeString", "")
     url = item.get("Url", "")
     if url and not url.startswith("http"):
         url = f"https://youdo.com{url}"
     description = await _fetch_description(session, task_id)
-    return {"task_id": task_id, "text": _format_notification(title, description, price, url)}
+    return {
+        "task_id": task_id,
+        "text": _format_notification(title, description, price, url, date_str),
+    }
 
 
 async def fetch_new_tasks() -> List[Dict]:
     """
-    Первый вызов: возвращает ВСЕ открытые задачи (все страницы), от старых к новым.
+    Первый вызов: все задачи за DAYS_BACK дней, от старых к новым.
     Последующие: только задачи с ID выше последнего виденного.
     """
     initialized = storage.get_setting(SETTING_INIT, "0") == "1"
@@ -119,30 +189,40 @@ async def fetch_new_tasks() -> List[Dict]:
         async with aiohttp.ClientSession(headers=HEADERS) as session:
 
             if not initialized:
-                # Собираем все страницы
                 all_items: List[Dict] = []
                 page = 1
                 while True:
                     items = await _fetch_page(session, page)
                     if not items:
                         break
-                    all_items.extend(items)
+
+                    # логируем первую страницу чтобы видеть форматы дат
+                    if page == 1:
+                        dates = [i.get("DateTimeString", "") for i in items[:5]]
+                        logger.info(f"YouDo даты первых задач: {dates}")
+
+                    fresh = [i for i in items if _is_within_days(i.get("DateTimeString", ""), DAYS_BACK)]
+                    all_items.extend(fresh)
+
+                    # если все на странице старше DAYS_BACK — дальше не идём
+                    if len(fresh) < len(items):
+                        break
                     if len(items) < 50:
                         break
                     page += 1
                     await asyncio.sleep(0.5)
 
                 if not all_items:
+                    storage.set_setting(SETTING_INIT, "1")
                     return []
 
-                # Сортируем от старых к новым (ID возрастает)
+                # от старых к новым
                 all_items.sort(key=lambda x: int(x.get("Id") or 0))
                 new_max = int(all_items[-1].get("Id") or 0)
-
                 storage.set_setting(SETTING_MAX_ID, str(new_max))
                 storage.set_setting(SETTING_INIT, "1")
 
-                logger.info(f"YouDo: первый запуск, загружено {len(all_items)} задач со всех страниц")
+                logger.info(f"YouDo: первый запуск, {len(all_items)} задач за {DAYS_BACK} дня, страниц={page}")
 
                 result = []
                 for item in all_items:
@@ -150,7 +230,6 @@ async def fetch_new_tasks() -> List[Dict]:
                 return result
 
             else:
-                # Обычный режим — только страница 1, только новее last_max_id
                 items = await _fetch_page(session, 1)
                 if not items:
                     logger.info("YouDo: новых заданий нет")
