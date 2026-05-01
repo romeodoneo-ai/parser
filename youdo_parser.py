@@ -134,12 +134,12 @@ async def _fetch_detail(session: aiohttp.ClientSession, task_id: str) -> dict:
             data = await resp.json(content_type=None)
             task_data = data.get("ResultObject", {}).get("TaskData", {})
             dates = task_data.get("Dates", {})
-            created_str = dates.get("CreationDateTime", "")
             created = None
-            if created_str:
+            ts_ms = dates.get("CreationDate")
+            if ts_ms:
                 try:
-                    created = datetime.fromisoformat(created_str)
-                except ValueError:
+                    created = datetime.fromtimestamp(int(ts_ms) / 1000)
+                except Exception:
                     pass
             return {
                 "description": (task_data.get("Description") or "").strip(),
@@ -229,7 +229,7 @@ async def fetch_new_tasks() -> List[Dict]:
                 tasks_built = await asyncio.gather(*[fetch_with_sem(i) for i in all_items])
 
                 # фильтруем по дате создания (последние DAYS_BACK дней)
-                cutoff = datetime.now().astimezone() - timedelta(days=DAYS_BACK)
+                cutoff = datetime.now() - timedelta(days=DAYS_BACK)
                 fresh = []
                 for t in tasks_built:
                     created = t.get("created")
@@ -237,7 +237,7 @@ async def fetch_new_tasks() -> List[Dict]:
                         fresh.append(t)
 
                 # от старых к новым
-                fresh.sort(key=lambda t: t.get("created") or datetime.min.replace(tzinfo=cutoff.tzinfo))
+                fresh.sort(key=lambda t: t.get("created") or datetime.min)
 
                 logger.info(f"YouDo: {len(fresh)} задач за последние {DAYS_BACK} дня (из {len(all_items)})")
                 return fresh
