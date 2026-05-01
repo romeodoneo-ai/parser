@@ -143,7 +143,7 @@ async def _fetch_description(session: aiohttp.ClientSession, task_id: str) -> st
 async def _fetch_page(session: aiohttp.ClientSession, page: int) -> List[Dict]:
     payload = {
         "q": "", "list": "all", "status": "opened",
-        "sortType": 1, "page": page,
+        "sortType": 2, "page": page,
         "lat": 55.755864, "lng": 37.617698,
         "noOffers": False, "onlySbr": False, "onlyB2B": False,
         "onlyVacancies": False, "onlyVirtual": False, "priceMin": "",
