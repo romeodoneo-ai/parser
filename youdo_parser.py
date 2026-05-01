@@ -6,6 +6,7 @@
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import aiohttp
 
@@ -45,7 +46,7 @@ def _is_it_task(item: dict) -> bool:
     return bool(flag & IT_FLAGS)
 
 
-def _parse_date(item: dict) -> datetime | None:
+def _parse_date(item: dict) -> Optional[datetime]:
     """Пробуем разные поля с датой."""
     for field in ("DateCreate", "DateTimeString", "Date", "CreateDate"):
         raw = item.get(field)
