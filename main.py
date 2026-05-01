@@ -13,7 +13,6 @@ from telethon import TelegramClient
 import storage
 from monitor import Monitor
 from manager_bot import ManagerBot
-from web_monitor import WebMonitor
 
 # ─── Папки создаём до всего остального ──────────────────────────────────────
 Path("data").mkdir(exist_ok=True)
@@ -137,7 +136,6 @@ async def main():
     # Создаём и настраиваем компоненты
     monitor = Monitor(cfg, user_client, notify_client)
     manager = ManagerBot(cfg, manager_client, monitor, notify_client=notify_client)
-    web_monitor = WebMonitor(cfg, notify_client, lambda: monitor.paused)
 
     monitor.setup()
     manager.setup()
@@ -160,7 +158,7 @@ async def main():
 
     logger.info("Мониторинг запущен. Ожидаем сообщения…")
 
-    clients = [user_client.run_until_disconnected(), notify_client.run_until_disconnected(), web_monitor.run()]
+    clients = [user_client.run_until_disconnected(), notify_client.run_until_disconnected()]
     if manager_client != notify_client:
         clients.append(manager_client.run_until_disconnected())
 

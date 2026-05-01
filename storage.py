@@ -55,27 +55,6 @@ def init_db():
                 added_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS websites (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                url              TEXT UNIQUE NOT NULL,
-                name             TEXT NOT NULL,
-                interval_minutes INTEGER DEFAULT 20,
-                active           INTEGER DEFAULT 1,
-                added_at         TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS web_hashes (
-                url          TEXT PRIMARY KEY,
-                content_hash TEXT NOT NULL,
-                checked_at   TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS seen_web_tasks (
-                task_url  TEXT PRIMARY KEY,
-                site_name TEXT NOT NULL,
-                seen_at   TEXT NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS matches (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel          TEXT NOT NULL,
@@ -94,11 +73,6 @@ def init_db():
                 marked_at  TEXT NOT NULL
             );
         """)
-        # Миграция: добавляем raw_mode если колонки ещё нет
-        try:
-            conn.execute("ALTER TABLE websites ADD COLUMN raw_mode INTEGER DEFAULT 0")
-        except Exception:
-            pass
 
 
 # ─────────────── Просмотренные сообщения ───────────────
@@ -207,18 +181,6 @@ def set_setting(key: str, value: str):
             (key, value),
         )
 
-def web_keywords_enabled() -> bool:
-    return get_setting("web_keywords", "1") == "1"
-
-def set_web_keywords(enabled: bool):
-    set_setting("web_keywords", "1" if enabled else "0")
-
-def contacts_filter_web_enabled() -> bool:
-    return get_setting("contacts_filter_web", "0") == "1"
-
-def set_contacts_filter_web(enabled: bool):
-    set_setting("contacts_filter_web", "1" if enabled else "0")
-
 def contacts_filter_tg_enabled() -> bool:
     return get_setting("contacts_filter_tg", "0") == "1"
 
@@ -251,85 +213,6 @@ def remove_excluded_keyword(keyword: str) -> bool:
         return cursor.rowcount > 0
 
 
-# ─────────────── Сайты ───────────────
-
-def get_websites():
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT url, name, interval_minutes, COALESCE(raw_mode, 0) as raw_mode FROM websites WHERE active=1"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-def add_website(url: str, name: str, interval_minutes: int = 20):
-    url = url.strip()
-    with get_conn() as conn:
-        try:
-            conn.execute(
-                "INSERT INTO websites (url, name, interval_minutes, added_at) VALUES (?, ?, ?, ?)",
-                (url, name, interval_minutes, datetime.now().isoformat()),
-            )
-        except sqlite3.IntegrityError:
-            conn.execute("UPDATE websites SET active=1 WHERE url=?", (url,))
-
-def remove_website(url: str) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute("UPDATE websites SET active=0 WHERE url=?", (url.strip(),))
-        return cursor.rowcount > 0
-
-def set_site_interval(name: str, minutes: int) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            "UPDATE websites SET interval_minutes=? WHERE LOWER(name)=LOWER(?) AND active=1",
-            (minutes, name.strip()),
-        )
-        return cursor.rowcount > 0
-
-def set_site_raw_mode(name: str, enabled: bool) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            "UPDATE websites SET raw_mode=? WHERE LOWER(name)=LOWER(?) AND active=1",
-            (1 if enabled else 0, name.strip()),
-        )
-        return cursor.rowcount > 0
-
-def remove_website_by_name(name: str) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute("UPDATE websites SET active=0 WHERE LOWER(name)=LOWER(?)", (name.strip(),))
-        return cursor.rowcount > 0
-
-def get_web_hash(url: str):
-    with get_conn() as conn:
-        row = conn.execute("SELECT content_hash FROM web_hashes WHERE url=?", (url,)).fetchone()
-        return row["content_hash"] if row else None
-
-def is_web_task_seen(task_url: str) -> bool:
-    with get_conn() as conn:
-        row = conn.execute("SELECT 1 FROM seen_web_tasks WHERE task_url=?", (task_url,)).fetchone()
-        return row is not None
-
-def mark_web_task_seen(task_url: str, site_name: str):
-    with get_conn() as conn:
-        try:
-            conn.execute(
-                "INSERT INTO seen_web_tasks (task_url, site_name, seen_at) VALUES (?, ?, ?)",
-                (task_url, site_name, datetime.now().isoformat()),
-            )
-        except sqlite3.IntegrityError:
-            pass
-
-def clear_seen_web_tasks():
-    """Сбрасывает историю просмотренных заказов (для повторной проверки)."""
-    with get_conn() as conn:
-        conn.execute("DELETE FROM seen_web_tasks")
-
-def set_web_hash(url: str, content_hash: str):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO web_hashes (url, content_hash, checked_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(url) DO UPDATE SET content_hash=excluded.content_hash, checked_at=excluded.checked_at",
-            (url, content_hash, datetime.now().isoformat()),
-        )
-
 # ─────────────── Статистика ───────────────
 
 def get_stats() -> dict:
@@ -347,47 +230,6 @@ def get_stats() -> dict:
             "today_matches": today_matches,
         }
 
-
-def get_site_report(site_name: str, hours: float = 24):
-    """
-    Возвращает все заказы с конкретного сайта за последние N часов.
-    Каждый элемент: {task_url, seen_at, passed_filter, preview, matched_keywords}
-    passed_filter=True — заказ прошёл фильтры и был отправлен в Telegram.
-    """
-    from datetime import timedelta
-    since = (datetime.now() - timedelta(hours=hours)).isoformat()
-    with get_conn() as conn:
-        # Все просмотренные задачи с этого сайта за период
-        seen_rows = conn.execute(
-            "SELECT task_url, seen_at FROM seen_web_tasks "
-            "WHERE LOWER(site_name)=LOWER(?) AND seen_at >= ? ORDER BY seen_at DESC",
-            (site_name.strip(), since),
-        ).fetchall()
-
-        # URL-ы тех, что прошли фильтры (они сохранены в matches.channel = task_url)
-        if seen_rows:
-            urls = [r["task_url"] for r in seen_rows]
-            placeholders = ",".join("?" * len(urls))
-            matched_rows = conn.execute(
-                f"SELECT channel, preview, matched_keywords FROM matches WHERE channel IN ({placeholders})",
-                urls,
-            ).fetchall()
-            matched_map = {r["channel"]: dict(r) for r in matched_rows}
-        else:
-            matched_map = {}
-
-    result = []
-    for row in seen_rows:
-        url = row["task_url"]
-        m = matched_map.get(url)
-        result.append({
-            "task_url":        url,
-            "seen_at":         row["seen_at"],
-            "passed_filter":   url in matched_map,
-            "preview":         m["preview"] if m else "",
-            "matched_keywords": m["matched_keywords"] if m else "",
-        })
-    return result
 
 def get_matches_since(hours: float):
     from datetime import timedelta
