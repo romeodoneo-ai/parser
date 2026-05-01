@@ -13,6 +13,7 @@ from telethon import TelegramClient
 import storage
 from monitor import Monitor
 from manager_bot import ManagerBot
+from youdo_parser import fetch_new_tasks
 
 # ─── Папки создаём до всего остального ──────────────────────────────────────
 Path("data").mkdir(exist_ok=True)
@@ -157,6 +158,20 @@ async def main():
         pass
 
     logger.info("Мониторинг запущен. Ожидаем сообщения…")
+
+    async def youdo_poll_loop():
+        user_id = tg["your_user_id"]
+        logger.info("YouDo парсер запущен (интервал 60 сек).")
+        while True:
+            try:
+                tasks = await fetch_new_tasks()
+                for task in tasks:
+                    await notify_client.send_message(user_id, task["text"], parse_mode="md")
+            except Exception as e:
+                logger.error(f"YouDo poll loop error: {e}")
+            await asyncio.sleep(60)
+
+    asyncio.create_task(youdo_poll_loop())
 
     clients = [user_client.run_until_disconnected(), notify_client.run_until_disconnected()]
     if manager_client != notify_client:

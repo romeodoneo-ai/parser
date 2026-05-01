@@ -72,6 +72,11 @@ def init_db():
                 preview    TEXT,
                 marked_at  TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS youdo_seen_tasks (
+                task_id  TEXT PRIMARY KEY,
+                seen_at  TEXT NOT NULL
+            );
         """)
 
 
@@ -266,6 +271,27 @@ def get_match_by_id(match_id: int) -> dict:
             "SELECT channel, matched_keywords, preview FROM matches WHERE id=?", (match_id,)
         ).fetchone()
         return dict(row) if row else {}
+
+
+# ─────────────── YouDo задания ───────────────
+
+def is_youdo_seen(task_id: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM youdo_seen_tasks WHERE task_id=?", (task_id,)
+        ).fetchone()
+        return row is not None
+
+
+def mark_youdo_seen(task_id: str):
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO youdo_seen_tasks (task_id, seen_at) VALUES (?, ?)",
+                (task_id, datetime.now().isoformat()),
+            )
+        except sqlite3.IntegrityError:
+            pass
 
 
 def get_recent_matches(limit: int = 5):
