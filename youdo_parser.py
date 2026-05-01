@@ -32,6 +32,8 @@ HEADERS = {
 # Подкатегории раздела "Разработка ПО"
 IT_SUB_IDS = [148, 146, 62, 63, 244, 245, 147, 246, 108]
 
+SETTING_MAX_ID = "youdo_last_max_id"
+
 
 def _format_price(item: Dict) -> str:
     budget = (item.get("BudgetDescription") or "").strip()
@@ -53,7 +55,6 @@ def _format_notification(title: str, description: str, price: str, url: str) -> 
 
 
 async def _fetch_description(session: aiohttp.ClientSession, task_id: str) -> str:
-    """Загружает описание задачи с детальной страницы."""
     try:
         async with session.get(
             TASK_URL.format(task_id),
@@ -75,7 +76,8 @@ async def _fetch_description(session: aiohttp.ClientSession, task_id: str) -> st
 async def fetch_new_tasks() -> List[Dict]:
     """
     Возвращает список {'task_id': str, 'text': str} для новых заданий.
-    При первом вызове (пустая таблица) только засевает ID без отправки.
+    Использует максимальный ID задачи как метку времени — всё что выше → новое.
+    При первом запуске только запоминает текущий максимум без отправки.
     """
     payload = {
         "q": "",
@@ -103,7 +105,6 @@ async def fetch_new_tasks() -> List[Dict]:
                     return []
                 data = await resp.json(content_type=None)
 
-            items = []
             try:
                 items = data["ResultObject"]["Items"]
             except (KeyError, TypeError):
@@ -111,26 +112,36 @@ async def fetch_new_tasks() -> List[Dict]:
                 return []
 
             if not items:
-                logger.debug("YouDo: список задач пуст")
+                logger.debug("YouDo: список пуст")
                 return []
 
-            first_run = not storage.has_youdo_seen_any()
-            if first_run:
-                logger.info(f"YouDo: первый запуск, засеваем {len(items)} заданий (без отправки)")
+            # ID задач — целые числа, большее = новее
+            ids = [int(item["Id"]) for item in items if item.get("Id")]
+            if not ids:
+                return []
+            current_max = max(ids)
+
+            last_max = int(storage.get_setting(SETTING_MAX_ID, "0"))
+
+            # Первый запуск — запоминаем максимум и ничего не шлём
+            if last_max == 0:
+                storage.set_setting(SETTING_MAX_ID, str(current_max))
+                logger.info(f"YouDo: первый запуск, запомнили max_id={current_max}")
+                return []
+
+            # Обычный запуск — шлём только задачи новее last_max
+            new_items = [item for item in items if int(item.get("Id", 0)) > last_max]
+
+            if not new_items:
+                logger.info("YouDo: новых заданий нет")
+                return []
+
+            logger.info(f"YouDo: {len(new_items)} новых заданий (id > {last_max})")
+            storage.set_setting(SETTING_MAX_ID, str(current_max))
 
             new_tasks = []
-            for item in items:
-                task_id = str(item.get("Id", ""))
-                if not task_id:
-                    continue
-                if storage.is_youdo_seen(task_id):
-                    continue
-
-                storage.mark_youdo_seen(task_id)
-
-                if first_run:
-                    continue
-
+            for item in new_items:
+                task_id = str(item["Id"])
                 title = (item.get("Name") or "Без названия").strip()
                 price = _format_price(item)
                 url = item.get("Url", "")
@@ -138,14 +149,8 @@ async def fetch_new_tasks() -> List[Dict]:
                     url = f"https://youdo.com{url}"
 
                 description = await _fetch_description(session, task_id)
-
                 text = _format_notification(title, description, price, url)
                 new_tasks.append({"task_id": task_id, "text": text})
-
-            if new_tasks:
-                logger.info(f"YouDo: {len(new_tasks)} новых заданий")
-            elif not first_run:
-                logger.info("YouDo: новых заданий нет")
 
             return new_tasks
 
